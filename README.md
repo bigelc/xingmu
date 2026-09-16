@@ -11,7 +11,7 @@
 
 **1.0.5 · 构建 105.9.11 · 2026-09-16**
 
-本仓库发布的是 TO-DO Panel 二开版更名为「醒目」后的实际安装版本。发布包中的应用与本次已经启动验收的应用一致；运行源码与该应用逐文件匹配，详见 [release-manifest.json](release-manifest.json)。本地开发目录中尚未安装的后续改动未包含在本次发布中。
+醒目是一款常驻 Mac 屏幕顶部的本地工作台，将待办、笔记、链接、录音与专注工具集中在一个随手可用的面板里。你可以记录想法、整理资料、选择当前任务，并通过紧急与重要坐标安排优先级。
 
 ## 能做什么
 
@@ -55,14 +55,12 @@ npm run build:zip
 
 应用使用 Electron 44 与原生 HTML/CSS/JavaScript，构建配置位于 `package.json`。`package-lock.json` 固定依赖树。源代码构建生成相同功能版本，但文件时间戳与签名等可能使二进制校验和不同于本次打包的已安装快照。
 
-## 更名与数据兼容
+## 数据与设置
 
-对外名称统一为「醒目」。为保留原二开版的用户数据和 macOS 钥匙串身份，内部应用名与数据目录名仍为 `TO-DO Panel 二开版`，Bundle ID 仍为 `com.dynamicpanel.app.custom`。因此，曾使用该二开版的用户安装后会继续使用原来的本机资料。
+工作区资料保存在本机，可在设置中查看或更换数据文件夹。应用支持自定义功能显示、首页组件、唤出快捷键和开机启动。
 
-默认数据目录为 `~/Library/Application Support/TO-DO Panel 二开版`，本机通知端口为 `127.0.0.1:43822`。请勿与原二开版同时运行；原 TO-DO Panel 官方版使用不同身份和端口。
+已有用户的数据兼容说明和开发者配置见 [数据与兼容说明](docs/data-compatibility.md)。本版本运行源码与发布应用逐文件匹配，详见 [release-manifest.json](release-manifest.json)。
 
-## 来源与许可
+## 许可证
 
-醒目基于 [xiaopu-ai/TO-DO-Panel](https://github.com/xiaopu-ai/TO-DO-Panel) 进行本地二次开发和更名，继续遵循 MIT License，并保留原项目署名。应用图标与默认素材沿用上游，本仓库不宣称它们为新原创作品。
-
-本次使用经过筛选的独立源码快照建立仓库历史。第三方组件与上游版权说明见 [NOTICE.md](NOTICE.md)。
+本项目采用 [MIT License](LICENSE)。版权与第三方组件声明见 [NOTICE.md](NOTICE.md)。

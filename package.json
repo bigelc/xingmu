@@ -1,7 +1,7 @@
 {
   "name": "to-do-panel",
   "version": "1.0.5",
-  "description": "醒目 - an independently isolated local workspace under the Mac notch",
+  "description": "醒目是一款常驻 Mac 屏幕顶部的本地工作台，集待办管理、笔记、链接、录音、番茄钟与任务坐标图于一体。",
   "main": "main.js",
   "author": "xiaopu-ai",
   "license": "MIT",
