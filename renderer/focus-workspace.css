@@ -1,0 +1,66 @@
+:root {
+  --focus-strip-h: 72px;
+  --focus-gap: 10px;
+  --focus-radius: 12px;
+  --focus-button-h: 30px;
+  --focus-dialog-width: 760px;
+  --focus-backdrop: rgba(0, 0, 0, .68);
+}
+.focus-strip, .focus-strip *, .focus-dialog, .focus-dialog * { box-sizing: border-box; }
+.focus-strip { flex: 0 0 var(--focus-strip-h); min-width: 0; min-height: var(--focus-strip-h); display: flex; align-items: center; gap: var(--focus-gap); padding: var(--s-2) var(--s-4); border: var(--hairline-w) solid var(--hairline); border-radius: var(--focus-radius); background: var(--surface-1); color: var(--text-1); }
+.focus-task-copy { flex: 1; min-width: 0; display: grid; gap: var(--s-half); }
+.focus-eyebrow { font-size: var(--fs-micro); color: var(--text-2); }
+#focus-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 550; }
+#focus-task-meta { color: var(--text-2); font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-strip-actions { display: flex; flex: 0 0 auto; gap: var(--s-2); align-items: center; }
+.focus-strip button, .focus-dialog button, .focus-dialog input { font: inherit; color: var(--text-1); border: var(--hairline-w) solid var(--hairline); border-radius: var(--r-input); background: var(--surface-2); }
+.focus-strip button, .focus-dialog button { cursor: pointer; min-height: var(--focus-button-h); padding: var(--s-1) var(--s-3); font-size: var(--fs-small); white-space: nowrap; }
+.focus-strip button:hover, .focus-dialog button:hover { background: var(--surface-3); }
+.focus-strip button:disabled { cursor: default; color: var(--text-2); }
+.focus-strip button:focus-visible, .focus-dialog button:focus-visible, .focus-dialog input:focus-visible { outline: var(--s-half) solid var(--focus-ring); outline-offset: var(--s-half); }
+.focus-strip [data-focus-action='start'], .focus-dialog .focus-primary { border-color: var(--focus-ring); }
+.focus-dialog { position: fixed; top: calc(var(--mb-h) + var(--topbar-h) + var(--s-3)); bottom: var(--s-5); margin: auto; width: min(var(--focus-dialog-width), calc(100vw - var(--s-6) * 2)); height: min(430px, calc(100vh - var(--mb-h) - var(--topbar-h) - var(--s-6) * 2)); max-width: none; max-height: none; padding: var(--s-4); border: var(--hairline-w) solid var(--hairline); border-radius: var(--focus-radius); background: var(--surface-1); color: var(--text-1); font-family: var(--font); font-size: var(--fs-ui); overflow: hidden; }
+.focus-dialog[open] { display: flex; flex-direction: column; gap: var(--focus-gap); }
+.focus-dialog::backdrop { background: var(--focus-backdrop); }
+.focus-dialog-head { display: flex; gap: var(--focus-gap); align-items: flex-start; flex: 0 0 auto; }
+.focus-dialog-head > div, .focus-dialog-head > h2 { flex: 1; min-width: 0; }
+.focus-dialog h2 { margin: 0; font-size: var(--fs-heading-2); font-weight: 550; }
+.focus-dialog-head p { margin: var(--s-1) 0 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-dialog-head > button { padding: 0; width: var(--focus-button-h); flex: 0 0 var(--focus-button-h); font-size: var(--fs-heading-1); border: 0; background: transparent; }
+.focus-dialog-caption { margin: 0; color: var(--text-2); font-size: var(--fs-small); flex: 0 0 auto; }
+.focus-search { padding: var(--s-2) var(--s-3); width: 100%; flex: 0 0 auto; }
+.focus-options { overflow-y: auto; min-height: 0; min-width: 0; }
+.focus-picker > .focus-options { flex: 1; padding: var(--s-half); }
+.focus-dialog .focus-task-option { display: grid; gap: var(--s-1); text-align: left; width: 100%; background: transparent; border-color: transparent; margin-bottom: var(--s-1); padding: var(--s-2) var(--s-3); white-space: normal; }
+.focus-task-option strong { font-weight: 500; overflow-wrap: anywhere; }
+.focus-task-option span { color: var(--text-2); font-size: var(--fs-caption); }
+.focus-dialog .focus-task-option[aria-pressed='true'] { background: var(--surface-3); border-color: var(--focus-ring); }
+.focus-resource-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-4); flex: 1; min-height: 0; }
+.focus-resource-columns > section { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.focus-resource-columns h3 { margin: 0 0 var(--s-2); font-size: var(--fs-body); font-weight: 500; }
+.focus-resource-columns .focus-options { flex: 1; padding: var(--s-half); }
+.focus-resource-row { display: flex; gap: var(--s-2); align-items: center; padding: var(--s-1) 0; min-width: 0; }
+.focus-resource-row label { display: flex; gap: var(--s-2); align-items: center; flex: 1; min-width: 0; cursor: pointer; }
+.focus-resource-row input { accent-color: var(--focus-ring); flex: 0 0 auto; }
+.focus-resource-row label span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-small); }
+.focus-resource-row button { flex: 0 0 auto; }
+.focus-empty { color: var(--text-2); font-size: var(--fs-small); line-height: 1.8; margin: var(--s-2) 0; }
+.focus-dialog-footer { display: flex; gap: var(--s-2); align-items: center; justify-content: flex-end; flex: 0 0 auto; }
+.focus-dialog-footer > span { flex: 1; color: var(--text-2); font-size: var(--fs-caption); min-width: 0; }
+#focus-resource-status { margin: 0; color: var(--accent-orange); font-size: var(--fs-small); min-height: var(--fs-small); flex: 0 0 auto; }
+.focus-strip [hidden], .focus-dialog [hidden] { display: none !important; }
+@media (max-width: 720px) {
+  .focus-strip { gap: var(--s-2); padding: var(--s-2) var(--s-3); }
+  .focus-strip-actions { gap: var(--s-1); }
+  .focus-strip button { padding: var(--s-1) var(--s-2); }
+  .focus-dialog { width: calc(100vw - var(--s-4) * 2); padding: var(--s-3); }
+}
+@media (max-width: 480px) {
+  .focus-strip { flex-wrap: wrap; height: auto; flex-basis: auto; }
+  .focus-task-copy { flex-basis: 100%; }
+  .focus-strip-actions { flex-wrap: wrap; }
+  .focus-resource-columns { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .focus-resource-columns > section { min-height: 110px; }
+  .focus-dialog-footer { flex-wrap: wrap; }
+  .focus-dialog-footer > span { flex-basis: 100%; }
+}

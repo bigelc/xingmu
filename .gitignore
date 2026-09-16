@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist.noindex/
+work/
+.DS_Store
+.env
+.env.*
+*.log
+*.dmg
+*.zip
+*.app/
+coverage/

@@ -1,0 +1,116 @@
+{
+  "name": "to-do-panel",
+  "version": "1.0.5",
+  "description": "醒目 - an independently isolated local workspace under the Mac notch",
+  "main": "main.js",
+  "author": "xiaopu-ai",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.js && node scripts/check-syntax.js",
+    "build": "electron-builder --mac dmg --publish never",
+    "build:zip": "electron-builder --mac zip --publish never",
+    "pack": "electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.7"
+  },
+  "build": {
+    "appId": "com.dynamicpanel.app.custom",
+    "productName": "醒目",
+    "artifactName": "XingMu-${version}-${arch}.${ext}",
+    "copyright": "© 2026 xiaopu-ai",
+    "asar": false,
+    "directories": {
+      "output": "dist.noindex",
+      "buildResources": "build"
+    },
+    "electronDist": "node_modules/electron/dist",
+    "afterPack": "./build/afterPack.js",
+    "files": [
+      "LICENSE",
+      "NOTICE.md",
+      "main.js",
+      "main-services.js",
+      "preload.js",
+      "renderer/**/*",
+      "scripts/codex-notify.js",
+      "scripts/claude-notify.js",
+      "package.json",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/.bin",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}"
+    ],
+    "mac": {
+      "icon": "build/to-do-panel-icon.icns",
+      "identity": null,
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "13.0",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "darkModeSupport": true,
+      "extendInfo": {
+        "LSUIElement": false,
+        "NSHighResolutionCapable": true,
+        "CFBundleDisplayName": "醒目",
+        "NSCameraUsageDescription": "醒目需要使用摄像头来显示「镜子」预览。",
+        "NSMicrophoneUsageDescription": "醒目需要使用麦克风来录音并生成转写文本。",
+        "NSAppleEventsUsageDescription": "醒目需要控制「系统事件」来枚举并聚焦当前窗口、发送汽水音乐快捷键。"
+      }
+    },
+    "dmg": {
+      "title": "醒目 ${version}",
+      "iconSize": 100,
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "buildVersion": "105.9.11",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "bigelc",
+        "repo": "xingmu"
+      }
+    ]
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bigelc/xingmu.git"
+  },
+  "homepage": "https://github.com/bigelc/xingmu",
+  "bugs": {
+    "url": "https://github.com/bigelc/xingmu/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

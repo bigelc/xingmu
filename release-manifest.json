@@ -1,0 +1,144 @@
+{
+  "application": "醒目",
+  "version": "1.0.5",
+  "build": "105.9.11",
+  "platform": "darwin-arm64",
+  "electronVersion": "44.0.0",
+  "upstream": "https://github.com/xiaopu-ai/TO-DO-Panel",
+  "upstreamBaseCommit": "e69cccaa27dd13333f6eeee483ac9187bade2299",
+  "runtimeFiles": [
+    {
+      "path": "main-services.js",
+      "sha256": "cbc90d11a86a7363199b9b6982189007f657a3ce627b1e85a8f6c97b4c932eb0"
+    },
+    {
+      "path": "main.js",
+      "sha256": "305c421843c0eb9dc5b17d841fb23c93aa2177ab4287658bb29260486a531999"
+    },
+    {
+      "path": "preload.js",
+      "sha256": "00fa553453acf187c8e063c0f058a43d58d99519b106043862b40a505dd8fddd"
+    },
+    {
+      "path": "renderer/app.js",
+      "sha256": "90eb6052f75bf9c0770b9e4c4fb30e716c7eb47ff65c303c39806f9088ab7f4d"
+    },
+    {
+      "path": "renderer/assets/app-logo-128.png",
+      "sha256": "dbb2cef4ffa8d7ff68116d87c0a772e82310ed70d562ccb06180e8ac7567cbdc"
+    },
+    {
+      "path": "renderer/assets/generated/music-bg-large.png",
+      "sha256": "e8791403677d2baa451c882615c0635f6e9bc7e5716eec99d8629c886d3c0293"
+    },
+    {
+      "path": "renderer/assets/generated/music-bg-medium.png",
+      "sha256": "ba78afa0b99ccfe5d3a5505c0780d86bed4810db522d6dbe2d44048e03b8a337"
+    },
+    {
+      "path": "renderer/assets/generated/music-bg-mini.png",
+      "sha256": "3b5a21b3d9f9c8f5773c8751ca4e80a0e8fa9d567feea5465a5ce0da807fa08a"
+    },
+    {
+      "path": "renderer/assets/generated/music-bg-small.png",
+      "sha256": "f3305f7c9e1bffe7dfe371b5e18caca414a23301c0b0e4155fad23644592aa8d"
+    },
+    {
+      "path": "renderer/assets/generated/pomodoro-bg-large.png",
+      "sha256": "dcb5c87d423315abc070ca66709cf21cbe6a22063e73753fdc98520b8ed7d47f"
+    },
+    {
+      "path": "renderer/assets/generated/pomodoro-bg-medium.png",
+      "sha256": "e902700c305f1f679cca6ba2e387aa198f7347eabebdd2391a57ce8be2f90fbe"
+    },
+    {
+      "path": "renderer/assets/generated/pomodoro-bg-mini.png",
+      "sha256": "634b30f4f9d32c114fcb1de3ce3971dfecfbb0a752d78d02ef56944b84fcca05"
+    },
+    {
+      "path": "renderer/assets/generated/pomodoro-bg-small.png",
+      "sha256": "d9e46cc6c055a2486e9d8e1c33c8c41635e5df37472a9af585cfe971d0544531"
+    },
+    {
+      "path": "renderer/assets/mirror-portrait.jpg",
+      "sha256": "9d8620b62a7ff263cd95000070b4994b59f1cee307fe647d266f2e7b41e357ec"
+    },
+    {
+      "path": "renderer/domain.js",
+      "sha256": "925f78c364fdd4dc4a5958775ae84241a04b7663e92d6a97910aa33744712fec"
+    },
+    {
+      "path": "renderer/effects.js",
+      "sha256": "39891c9c3aadc2985aac1e9d7e342937409233cb72637373638b809112503e95"
+    },
+    {
+      "path": "renderer/focus-workspace.css",
+      "sha256": "ccb27ce6637c8a019bab0595d3fb75964fa5e5cbdd1fb891a57e6b99dac016e3"
+    },
+    {
+      "path": "renderer/focus-workspace.js",
+      "sha256": "30fd2ae8ab9e466d03e4d1bdcacce19ae5b3c437e42ed058ec01f92df3986451"
+    },
+    {
+      "path": "renderer/icon-motion.js",
+      "sha256": "68b1d5ac0ca55348cb03166a0ca4491e5b57945063c46a84075bdc0c4ce99ce3"
+    },
+    {
+      "path": "renderer/index.html",
+      "sha256": "9f9046469dbc34b28edc40e3c2d389d2847cd241030302072392a838c04f66dc"
+    },
+    {
+      "path": "renderer/notification.css",
+      "sha256": "937d270a376341f3e15f3cee68069be5cf7833d8a9af33510e53f08ea3e1448f"
+    },
+    {
+      "path": "renderer/notification.html",
+      "sha256": "03e475ca62c731367371747b4c2200971cfa3acbffb8250050e595acd8767df6"
+    },
+    {
+      "path": "renderer/notification.js",
+      "sha256": "ace78963a5f0a0388a3fa7312ed3c385c04c241c87ac08a04e9b5abec0480ff3"
+    },
+    {
+      "path": "renderer/productivity.css",
+      "sha256": "69f8995f597560e70479d01db7de1b8ef52aa34411f6f7a4ac82eb65a6daa529"
+    },
+    {
+      "path": "renderer/quick-capture.js",
+      "sha256": "e0445ad86a38317838d79587130421aae6b2c08a4e6f447700d514569a63c1a4"
+    },
+    {
+      "path": "renderer/styles.css",
+      "sha256": "edc2ead4b26b1c74d4f0927ee8f51c56b828a5a656c972bc8c810004c6e3fa94"
+    },
+    {
+      "path": "renderer/task-map-domain.js",
+      "sha256": "5e44078999abad6c1182bde91ee6a431ec9955bdc7937f06b8e376ce8da5cbf0"
+    },
+    {
+      "path": "renderer/task-map.css",
+      "sha256": "df4f7ff6e332afbef6cc5ea57210f3cff42d5d0df3b6c4ec2f5667af303616ef"
+    },
+    {
+      "path": "renderer/task-map.js",
+      "sha256": "4616f771e5b99891146b1cde71dcc9dbb3ed329444a6a946a8f7a2cecbe105fc"
+    },
+    {
+      "path": "renderer/workspace-persistence.js",
+      "sha256": "fecc7287e2450a021d05806f26d7777f5a2407e6101b23eb959dca13a2587354"
+    },
+    {
+      "path": "renderer/workspace.js",
+      "sha256": "59a5362217a868796b257dafacf26e104eaf8654a327c03612be47410db69160"
+    },
+    {
+      "path": "scripts/claude-notify.js",
+      "sha256": "b042799ed26c62cba782ce76ecd15602b80fe27bbd82016c5696ce832b1d2238"
+    },
+    {
+      "path": "scripts/codex-notify.js",
+      "sha256": "143094ef2b194a73f0a00d1c33436f285342e5828c0d5fbfe6136823405c9a55"
+    }
+  ],
+  "note": "Runtime JS, HTML, CSS and assets match the installed rename-only edition. package.json adds development/build metadata; local user data and development-only changes are excluded."
+}
