@@ -22,13 +22,131 @@ const {
   taskNotificationWindowPolicy,
   prepareClipboardImagePayload,
   updateFeaturePreference,
-  controlSodaMusic,
-  sodaShortcutSpec,
+  normalizeDefaultTabPreference,
+  updateDefaultTabPreference,
   selectTranscriptionSettings,
   createWorkspacePersistenceGate,
   hoverSpacePollingPolicy,
   reduceClipboardObservation,
+  createForegroundMediaPermissionCoordinator,
 } = require('../main-services');
+
+test('media permission prompts temporarily leave the screen-saver window layer', async () => {
+  const events = [];
+  let alwaysOnTop = true;
+  const owner = {
+    isDestroyed: () => false,
+    isVisible: () => true,
+    isAlwaysOnTop: () => alwaysOnTop,
+    setAlwaysOnTop(value, level) {
+      alwaysOnTop = value;
+      events.push(['top', value, level]);
+    },
+    focus: () => events.push(['focus']),
+  };
+
+  const coordinator = createForegroundMediaPermissionCoordinator({
+    activate: () => events.push(['activate']),
+    track: (delta) => events.push(['track', delta]),
+  });
+  const granted = await coordinator.run({
+    owner,
+    request: async () => {
+      events.push(['request', alwaysOnTop]);
+      return true;
+    },
+  });
+
+  assert.equal(granted, true);
+  assert.equal(alwaysOnTop, true);
+  assert.deepEqual(events, [
+    ['track', 1],
+    ['top', false, undefined],
+    ['activate'],
+    ['focus'],
+    ['request', false],
+    ['top', true, 'screen-saver'],
+    ['track', -1],
+  ]);
+});
+
+test('media permission prompts restore the window layer when the system request fails', async () => {
+  let alwaysOnTop = true;
+  const deltas = [];
+  const owner = {
+    isDestroyed: () => false,
+    isVisible: () => true,
+    isAlwaysOnTop: () => alwaysOnTop,
+    setAlwaysOnTop(value) { alwaysOnTop = value; },
+    focus() {},
+  };
+
+  const coordinator = createForegroundMediaPermissionCoordinator({
+    activate() {},
+    track: (delta) => deltas.push(delta),
+  });
+  await assert.rejects(() => coordinator.run({
+    owner,
+    request: async () => { throw new Error('permission service failed'); },
+  }), /permission service failed/);
+
+  assert.equal(alwaysOnTop, true);
+  assert.deepEqual(deltas, [1, -1]);
+});
+
+test('overlapping media prompts stay below system UI until every request settles', async () => {
+  let alwaysOnTop = true;
+  const deltas = [];
+  const releases = [];
+  const owner = {
+    isDestroyed: () => false,
+    isAlwaysOnTop: () => alwaysOnTop,
+    setAlwaysOnTop(value) { alwaysOnTop = value; },
+    focus() {},
+  };
+  const coordinator = createForegroundMediaPermissionCoordinator({
+    activate() {},
+    track: (delta) => deltas.push(delta),
+  });
+  const request = () => new Promise((resolve) => releases.push(resolve));
+
+  const camera = coordinator.run({ owner, request });
+  const microphone = coordinator.run({ owner, request });
+  assert.equal(alwaysOnTop, false);
+  assert.deepEqual(deltas, [1, 1]);
+
+  releases[0](true);
+  assert.equal(await camera, true);
+  assert.equal(alwaysOnTop, false, 'the second system prompt is still awaiting a decision');
+  assert.deepEqual(deltas, [1, 1, -1]);
+
+  releases[1](false);
+  assert.equal(await microphone, false);
+  assert.equal(alwaysOnTop, true);
+  assert.deepEqual(deltas, [1, 1, -1, -1]);
+});
+
+test('a failed window-layer restore still releases the media interaction guard', async () => {
+  const deltas = [];
+  const owner = {
+    isDestroyed: () => false,
+    isAlwaysOnTop: () => true,
+    setAlwaysOnTop(value) {
+      if (value) throw new Error('restore failed');
+    },
+    focus() {},
+  };
+  const coordinator = createForegroundMediaPermissionCoordinator({
+    activate() {},
+    track: (delta) => deltas.push(delta),
+  });
+
+  await assert.rejects(() => coordinator.run({
+    owner,
+    request: async () => true,
+  }), /restore failed/);
+  assert.deepEqual(deltas, [1, -1]);
+});
 
 test('portable workspace persistence skips unchanged snapshots regardless of key order', () => {
   const gate = createWorkspacePersistenceGate();
@@ -167,10 +285,10 @@ test('todo reminder timers checkpoint far-future deadlines without overflowing N
 test('task notification identifies the repository and concrete finished work', () => {
   assert.deepEqual(taskNotificationIdentity({
     title: '新的任务已经完成',
-    cwd: '/tmp/example-project',
+    cwd: '/Users/ahai/Documents/灵动岛',
     'last-assistant-message': '已完成 VS Code 工作区名称识别，并修复拖拽残留。\n测试已通过。',
   }, 'codex'), {
-    project: 'example-project',
+    project: '灵动岛',
     title: '已完成 VS Code 工作区名称识别，并修复拖拽残留。',
   });
   assert.deepEqual(taskNotificationIdentity({
@@ -181,10 +299,10 @@ test('task notification identifies the repository and concrete finished work', (
     title: '生成课程大纲',
   });
   assert.deepEqual(taskNotificationIdentity({
-    cwd: '/tmp/example-project',
+    cwd: '/Users/ahai/Documents/灵动岛',
     last_assistant_message: '## 已接好 Claude Code 的 Stop 钩子\n测试全部通过。',
   }, 'claude'), {
-    project: 'example-project',
+    project: '灵动岛',
     title: '已接好 Claude Code 的 Stop 钩子',
   });
   // 记录文件还没落盘时标题为空，各来源要退回自己的兜底文案。
@@ -291,6 +409,7 @@ test('local Electron windows deny renderer navigation and child windows', () => 
   let windowOpenHandler = null;
   let navigationHandler = null;
   const webContents = {
+    getURL() { return 'file:///app/renderer/index.html'; },
     setWindowOpenHandler(handler) { windowOpenHandler = handler; },
     on(eventName, handler) {
       if (eventName === 'will-navigate') navigationHandler = handler;
@@ -302,6 +421,14 @@ test('local Electron windows deny renderer navigation and child windows', () => 
   let prevented = false;
   navigationHandler({ preventDefault() { prevented = true; } }, 'https://example.com');
   assert.equal(prevented, true);
+  for (const url of ['file:///app/renderer/other.html', 'file:///app/renderer/index.html?other', 'https://example.com']) {
+    let denied = false;
+    navigationHandler({ preventDefault() { denied = true; } }, url);
+    assert.equal(denied, true, `Navigation must remain denied: ${url}`);
+  }
+  let reloadDenied = false;
+  navigationHandler({ preventDefault() { reloadDenied = true; } }, 'file:///app/renderer/index.html');
+  assert.equal(reloadDenied, false, 'Portable workspace recovery may reload only the exact current local page');
 });
 
 test('native file pickers stay attached to the panel and always release the transient guard', async () => {
@@ -431,79 +558,22 @@ test('feature preferences only update configurable tabs and keep permanent tabs 
   assert.equal(updateFeaturePreference({ todo: true }, 'todo', 'false'), null);
 });
 
-test('first Soda Music play launches the app and starts its restored song', async () => {
-  const events = [];
-  let running = false;
-  const result = await controlSodaMusic('play', {
-    isRunning: async () => {
-      events.push('running');
-      return running;
-    },
-    launch: async () => {
-      events.push('launch');
-      running = true;
-      return true;
-    },
-    sendShortcut: async (action) => {
-      events.push(`shortcut:${action}`);
-      return { ok: true };
-    },
-    sleep: async () => {},
+test('default panel tab accepts visible tabs and falls back to home safely', () => {
+  const features = { todo: true, notes: false, clip: false };
+  assert.equal(normalizeDefaultTabPreference('todo', features), 'todo');
+  assert.equal(normalizeDefaultTabPreference('settings', features), 'settings');
+  assert.equal(normalizeDefaultTabPreference('notes', features), 'home');
+  assert.equal(normalizeDefaultTabPreference('unknown', features), 'home');
+  assert.deepEqual(updateDefaultTabPreference({ features, shortcut: 'Space' }, 'todo'), {
+    features,
+    shortcut: 'Space',
+    defaultTab: 'todo',
   });
-
-  assert.deepEqual(events, ['running', 'launch', 'running', 'shortcut:play']);
-  assert.equal(result.ok, true);
-  assert.equal(result.running, true);
-  assert.equal(result.playing, true);
-  assert.equal(result.bootstrapped, true);
-});
-
-test('running Soda Music uses its own shortcuts because native media status can stay empty', async () => {
-  const events = [];
-  const result = await controlSodaMusic('play', {
-    isRunning: async () => true,
-    launch: async () => {
-      events.push('launch');
-      return true;
-    },
-    sendShortcut: async (action) => {
-      events.push(`shortcut:${action}`);
-      return { ok: true };
-    },
-    sleep: async () => {},
-  });
-
-  assert.deepEqual(events, ['shortcut:play']);
-  assert.equal(result.ok, true);
-  assert.equal(result.playing, true);
-  assert.equal(result.bootstrapped, false);
-});
-
-test('Soda Music pause and track navigation preserve explicit playback state', async () => {
-  const shortcuts = [];
-  const dependencies = {
-    isRunning: async () => true,
-    launch: async () => true,
-    sendShortcut: async (action) => {
-      shortcuts.push(action);
-      return { ok: true };
-    },
-    sleep: async () => {},
-  };
-
-  assert.equal((await controlSodaMusic('pause', dependencies)).playing, false);
-  assert.equal((await controlSodaMusic('next', dependencies, false)).playing, true);
-  assert.equal((await controlSodaMusic('previous', dependencies, false)).playing, true);
-  assert.deepEqual(shortcuts, ['pause', 'next', 'previous']);
-});
-
-test('Soda Music play uses the play/pause toggle instead of the next-track key', () => {
-  // play 曾经和 next 撞成同一个键（Cmd+Right），点播放实际是切歌、歌不会开始播。
-  // Space 是播放/暂停切换键，play 与 pause 共用它，next / previous 必须与之不同。
-  assert.deepEqual(sodaShortcutSpec('play'), { keyCode: 49, command: false, dismissOverlays: true });
-  assert.deepEqual(sodaShortcutSpec('pause'), { keyCode: 49, command: false, dismissOverlays: true });
-  assert.deepEqual(sodaShortcutSpec('next'), { keyCode: 124, command: true, dismissOverlays: true });
-  assert.deepEqual(sodaShortcutSpec('previous'), { keyCode: 123, command: true, dismissOverlays: true });
-  assert.notDeepEqual(sodaShortcutSpec('play'), sodaShortcutSpec('next'));
-  assert.equal(sodaShortcutSpec('invalid'), null);
+  assert.equal(updateDefaultTabPreference({ features }, 'notes'), null);
+  const usageEnabled = updateFeaturePreference(features, 'ai-usage', true);
+  assert.equal(usageEnabled['ai-usage'], true);
+  assert.equal(updateDefaultTabPreference({ features: usageEnabled }, 'ai-usage').defaultTab, 'ai-usage');
+  const usageDisabled = updateFeaturePreference(usageEnabled, 'ai-usage', false);
+  assert.equal(normalizeDefaultTabPreference('ai-usage', usageDisabled), 'home');
+  assert.equal(updateDefaultTabPreference({ features: usageDisabled }, 'ai-usage'), null);
 });

@@ -7,33 +7,15 @@ function subscribe(channel, handler) {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 
-// A renderer document keeps the revision it loaded. A switch notification must
-// never refresh this token: its queued timers still contain the old workspace.
-let workspaceRevision = null;
-const workspaceDocumentId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-async function loadWorkspaceState() {
-  const state = await ipcRenderer.invoke('workspace:load-state', { documentId: workspaceDocumentId });
-  workspaceRevision = state.revision;
-  return state;
-}
-
 contextBridge.exposeInMainWorld('notchAPI', {
-  quitApp: () => ipcRenderer.invoke('app:quit'),
-  onPrepareQuit: (cb) => subscribe('app:prepare-quit', (event, payload) => cb(payload)),
-  finishQuitPreparation: (payload) => ipcRenderer.send('app:quit-prepared', payload),
-  onQuitCancelled: (cb) => subscribe('app:quit-cancelled', (event, payload) => cb(payload)),
-  onOpenHome: (cb) => subscribe('app:open-home', () => cb()),
+  platform: process.platform,
   setMode: (mode) => ipcRenderer.invoke('window:set-mode', mode),
-  returnToWork: () => ipcRenderer.invoke('window:return-to-work'),
   beginCollapse: () => ipcRenderer.invoke('window:begin-collapse'),
   setTab: (tab) => ipcRenderer.invoke('window:set-tab', tab),
-  ensureCamera: () => ipcRenderer.invoke('media:camera'),
   ensureMicrophone: () => ipcRenderer.invoke('media:microphone'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   openPrivacySettings: (pane) => ipcRenderer.invoke('shell:open-privacy-settings', pane),
-  getMusicStatus: () => ipcRenderer.invoke('music:status'),
-  controlMusic: (action) => ipcRenderer.invoke('music:control', action),
   inspectLink: (url) => ipcRenderer.invoke('links:inspect', url),
   listWindows: () => ipcRenderer.invoke('windows:list'),
   focusWindow: (windowId) => ipcRenderer.invoke('windows:focus', windowId),
@@ -48,6 +30,13 @@ contextBridge.exposeInMainWorld('notchAPI', {
   deleteCredentials: (ids) => ipcRenderer.invoke('credentials:delete-many', ids),
   copyCredential: (id, field) => ipcRenderer.invoke('credentials:copy', { id, field }),
   getTranscriptionConfig: () => ipcRenderer.invoke('transcription:get-config'),
+  getAISettings: () => ipcRenderer.invoke('ai:get-settings'),
+  getAIUsage: (options) => ipcRenderer.invoke('ai:get-usage', options),
+  chooseAIUsageImport: (payload) => ipcRenderer.invoke('ai:choose-usage-import', payload),
+  previewAIUsageImport: (payload) => ipcRenderer.invoke('ai:preview-usage-import', payload),
+  commitAIUsageImport: (payload) => ipcRenderer.invoke('ai:commit-usage-import', payload),
+  discoverAIModels: (payload) => ipcRenderer.invoke('ai:discover-models', payload),
+  saveAISettings: (payload) => ipcRenderer.invoke('ai:save-settings', payload),
   setTranscriptionConfig: (config) => ipcRenderer.invoke('transcription:set-config', config),
   startTranscription: () => ipcRenderer.invoke('transcription:start'),
   sendTranscriptionAudio: (bytes) => ipcRenderer.send('transcription:audio', bytes),
@@ -61,22 +50,24 @@ contextBridge.exposeInMainWorld('notchAPI', {
   onToggleShortcut: (cb) => subscribe('shortcut:toggle-panel', () => cb()),
   getHoverSpaceStatus: () => ipcRenderer.invoke('shortcut:hover-space-status'),
   getAppSettings: () => ipcRenderer.invoke('settings:get'),
+  getNews: (options) => ipcRenderer.invoke('news:list', options),
+  getNewsArticle: (payload) => ipcRenderer.invoke('news:article', payload),
+  translateNewsArticle: (payload) => ipcRenderer.invoke('news:translate', payload),
   setFeature: (featureId, enabled) => ipcRenderer.invoke('settings:set-feature', { featureId, enabled }),
+  setDefaultTab: (tab) => ipcRenderer.invoke('settings:set-default-tab', tab),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('settings:set-auto-launch', enabled === true),
   setPanelShortcut: (accelerator) => ipcRenderer.invoke('settings:set-shortcut', accelerator),
   onAppSettingsChanged: (cb) => subscribe('settings:changed', (event, settings) => cb(settings)),
   onRecordShortcut: (cb) => subscribe('app:record-shortcut', () => cb()),
   getWorkspace: () => ipcRenderer.invoke('workspace:get'),
-  loadWorkspaceData: async () => (await loadWorkspaceState()).localStorage,
-  loadWorkspaceState,
-  saveWorkspaceData: (storage) => ipcRenderer.invoke('workspace:save-data', { storage, revision: workspaceRevision }),
-  acknowledgeWorkspaceHydration: (revision) => ipcRenderer.invoke('workspace:hydrated', revision),
+  loadWorkspaceData: () => ipcRenderer.invoke('workspace:load-data'),
+  saveWorkspaceData: (storage) => ipcRenderer.invoke('workspace:save-data', storage),
   openWorkspace: () => ipcRenderer.invoke('workspace:open'),
   chooseWorkspace: () => ipcRenderer.invoke('workspace:choose'),
   onWorkspaceChanged: (cb) => subscribe('workspace:changed', (event, info) => cb(info)),
-  onPrepareWorkspaceSwitch: (cb) => subscribe('workspace:prepare-switch', (event, info) => cb(info)),
-  finishWorkspaceSwitchPreparation: (payload) => ipcRenderer.send('workspace:switch-prepared', { ...payload, revision: workspaceRevision }),
-  onWorkspaceSwitchCancelled: (cb) => subscribe('workspace:switch-cancelled', (event, info) => cb(info)),
+  onTodoInboxImport: (cb) => subscribe('todo-inbox:import', (event, message) => cb(message)),
+  todoInboxReady: () => ipcRenderer.invoke('todo-inbox:ready'),
+  completeTodoInbox: (token, result) => ipcRenderer.invoke('todo-inbox:complete', token, result),
   onCollapseRequest: (cb) => subscribe('window:request-collapse', () => cb()),
   getMetrics: () => ipcRenderer.invoke('window:metrics'),
   onMetricsChanged: (cb) =>
@@ -88,9 +79,6 @@ contextBridge.exposeInMainWorld('notchAPI', {
   onNewClipEntry: (cb) => subscribe('clipboard:new-entry', (evt, entry) => cb(entry)),
   onOpenClip: (cb) => subscribe('app:open-clip', () => cb()),
   onOpenApiSettings: (cb) => subscribe('app:open-api-settings', () => cb()),
-  getMirrorImage: () => ipcRenderer.invoke('mirror:get-image'),
-  chooseMirrorImage: () => ipcRenderer.invoke('mirror:choose-image'),
-  onMirrorImageChanged: (cb) => subscribe('mirror:image-changed', (event, dataUrl) => cb(dataUrl)),
   onTaskNotification: (cb) =>
     subscribe('task-notification:show', (event, notification) => cb(notification)),
   onTaskNotificationQueue: (cb) =>

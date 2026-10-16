@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 
 const NOTCH_HOST = '127.0.0.1';
-const NOTCH_PORT = 43822;
+const NOTCH_PORT = 43821;
 const REQUEST_TIMEOUT_MS = 900;
 const STDIN_TIMEOUT_MS = 1500;
 // 只回读记录文件尾部，避免长会话把整份 JSONL 读进内存。

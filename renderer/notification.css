@@ -1,5 +1,5 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
   /* 画布与刘海安全区 */
   --notification-width: 400px;
@@ -375,3 +375,48 @@ body {
     --motion-content-exit-duration: 1ms;
   }
 }
+
+
+/* Light workspace companion, preserving the physical black notch while collapsed. */
+:root {
+  --color-shell: #f8f7f4;
+  --color-shell-hover: #f2f4f7;
+  --color-surface: #edf1f6;
+  --color-border: #dfe4eb;
+  --color-border-strong: #cdd8e6;
+  --color-text-primary: #303b4b;
+  --color-text-secondary: #6b7788;
+  --color-text-tertiary: #7e8998;
+  --color-success: #367d61;
+  --color-focus: #6591ce;
+}
+.notification-shell {
+  --notification-accent: #397e60;
+  --notification-accent-rgb: 57, 126, 96;
+  background: #f8f7f4;
+  box-shadow: inset 0 0 0 1px rgba(66,78,96,.1), 0 12px 28px rgba(30,44,64,.14);
+}
+.notification-shell[data-source='gpt'] {
+  --notification-accent: #4b75b0;
+  --notification-accent-rgb: 75, 117, 176;
+}
+.notification-shell[data-source='todo'] {
+  --notification-accent: #a16d35;
+  --notification-accent-rgb: 161, 109, 53;
+}
+.notification-shell::before { display: none; }
+.notification-shell::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--notification-collapsed-width);
+  height: var(--notch-safe-height);
+  transform: translateX(-50%);
+  border-radius: 0 0 var(--radius-notch) var(--radius-notch);
+  background: #000;
+}
+.notification-shell:hover { filter: none; background: #f2f4f7; }
+.notification-logo-wrap { background: rgba(var(--notification-accent-rgb), .09); box-shadow: none; }
+.notification-queue { background: #eaf0f6; }
+.notification-shell .notification-source { border-color: rgba(var(--notification-accent-rgb),.13); background: rgba(var(--notification-accent-rgb),.06); }

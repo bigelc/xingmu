@@ -1,0 +1,102 @@
+name: Release macOS and Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    name: Build Apple Silicon DMG
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: node scripts/release-policy.js
+      - run: npm ci
+      - run: npm test
+      - name: Build DMG
+        run: npm run build
+      - name: Verify and checksum DMG
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          codesign --verify --deep --strict 'dist.noindex/mac-arm64/醒目-个人效率工作台.app'
+          hdiutil verify "dist.noindex/Xingmu-${version}-arm64.dmg"
+          cd dist.noindex
+          shasum -a 256 "Xingmu-${version}-arm64.dmg" > "Xingmu-${version}-arm64.dmg.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: |
+            dist.noindex/*.dmg
+            dist.noindex/*.dmg.sha256
+          if-no-files-found: error
+
+  windows:
+    name: Build and test Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: node scripts/release-policy.js
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:win
+      - name: Verify installed Windows application
+        shell: pwsh
+        run: ./scripts/verify-windows.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-test-evidence
+          path: dist.noindex/windows-smoke/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist.noindex/*-setup.exe
+            dist.noindex/*-setup.exe.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish verified installers
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Resolve release policy
+        id: release
+        run: node scripts/release-policy.js
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-installer'
+          merge-multiple: true
+          path: release-assets
+      - name: Publish GitHub Release
+        if: steps.release.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release-assets
+          sha256sum --check *.sha256
+          cd ..
+          gh release create "${GITHUB_REF_NAME}" release-assets/*.dmg release-assets/*.exe release-assets/*.sha256 --title "醒目-个人效率工作台 ${GITHUB_REF_NAME}" --notes-file docs/release-notes.md

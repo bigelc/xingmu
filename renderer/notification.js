@@ -8,6 +8,7 @@ const detailElement = document.getElementById('notification-detail');
 const queueElement = document.getElementById('notification-queue');
 
 const api = window.notchAPI;
+if (api?.platform === 'win32') shell.setAttribute('aria-label', '关闭任务提醒');
 const HIDE_FALLBACK_MS = 420;
 const MAX_QUEUE_COUNT = 99;
 
@@ -160,7 +161,7 @@ function subscribe(method, callback) {
 shell.addEventListener('pointerenter', () => reportHover(true));
 shell.addEventListener('pointerleave', () => reportHover(false));
 shell.addEventListener('click', async () => {
-  if (api && typeof api.activateTaskNotification === 'function') {
+  if (api?.platform !== 'win32' && api && typeof api.activateTaskNotification === 'function') {
     try { await api.activateTaskNotification(currentEventId); } catch (error) {}
   }
   hideNotification(currentEventId);

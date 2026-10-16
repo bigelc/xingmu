@@ -48,7 +48,6 @@ test('homepage visibility has one storage key, exact validation, and lifecycle e
   assert.match(appJs, /window\.NotchHome\s*=/);
   assert.match(appJs, /notch:home-modules-changed/);
   assert.match(appJs, /notch:home-layout-error/);
-  assert.match(appJs, /stopMirror\(\)/);
   assert.match(appJs, /new Set\(homeTiles\.map\(\(tile\) => tile\.dataset\.homeModule\)\)/);
 });
 
@@ -56,15 +55,32 @@ test('settings exposes exactly one switch for every homepage widget', () => {
   const switches = [...html.matchAll(/data-settings-home-module="([^"]+)"/g)]
     .map((match) => match[1]);
   assert.deepEqual(switches, [
-    'music', 'pomodoro', 'recorder', 'windows', 'mirror', 'note', 'commands', 'taskMap',
+    'news', 'pomodoro', 'recorder', 'windows', 'note', 'commands',
   ]);
   assert.match(workspaceJs, /isRecordingActive/);
   assert.match(workspaceJs, /recording_active/);
   assert.match(workspaceJs, /at_least_one_required/);
 });
 
-test('hidden visual widgets stop presentation-only background work', () => {
-  assert.match(effectsJs, /setEnabled/);
-  assert.match(effectsJs, /notch:home-modules-changed/);
-  assert.match(workspaceJs, /NotchHome\?\.isVisible/);
+test('settings exposes every panel tab as a possible default opening page', () => {
+  const select = html.match(/<select id="settings-default-tab"[\s\S]*?<\/select>/)?.[0] || '';
+  const options = [...select.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(options, [
+    'home', 'news', 'ai-usage', 'todo', 'notes', 'links', 'recordings', 'credentials', 'clip', 'settings',
+  ]);
+  assert.match(workspaceJs, /setDefaultTab/);
+});
+
+test('AI usage has one optional workspace tab beside news, with no old homepage card or modal', () => {
+  const tabs = [...html.matchAll(/id="tab-button-([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(tabs.slice(0,4), ['home','news','ai-usage','todo']);
+  assert.match(html, /id="tab-ai-usage"/);
+  assert.equal([...html.matchAll(/data-settings-feature="ai-usage"/g)].length, 1);
+  assert.doesNotMatch(html, /id="(?:home-ai-usage|ai-usage-backdrop|ai-usage-close)"|data-settings-home-module="ai-usage"/);
+});
+
+test('list interaction effects retain refresh and teardown hooks', () => {
+  assert.match(effectsJs, /refreshLists: decorateLineLists/);
+  assert.match(effectsJs, /listObserver\.disconnect\(\)/);
+  assert.match(effectsJs, /cancelAnimationFrame\(lineAnimation\)/);
 });

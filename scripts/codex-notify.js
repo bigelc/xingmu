@@ -22,7 +22,7 @@ const SKY_CLIENT = process.env.CODEX_COMPUTER_USE_CLIENT || path.join(
   'SkyComputerUseClient'
 );
 const NOTCH_HOST = '127.0.0.1';
-const NOTCH_PORT = 43822;
+const NOTCH_PORT = 43821;
 const REQUEST_TIMEOUT_MS = 900;
 
 const rawPayload = process.argv.length > 2 ? process.argv[process.argv.length - 1] : '{}';

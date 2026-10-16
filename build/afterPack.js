@@ -21,13 +21,6 @@ exports.default = async function afterPack(context) {
     throw new Error(`找不到 Electron 主程序：${electronExecutablePath}`);
   }
 
-  // Keep Electron/Chromium notices in every future source-built app.
-  const noticesDir = path.join(appPath, 'Contents', 'Resources', 'THIRD_PARTY_NOTICES');
-  fs.mkdirSync(noticesDir, { recursive: true });
-  for (const [source, target] of [['LICENSE', 'Electron-LICENSE.txt'], ['LICENSES.chromium.html', 'LICENSES.chromium.html']]) {
-    fs.copyFileSync(path.join(projectRoot, 'node_modules', 'electron', 'dist', source), path.join(noticesDir, target));
-  }
-
   console.log(`  • ad-hoc 签名 ${appPath}`);
 
   // 依次签：所有 dylib → Framework 内 Helpers → Framework binary → Helper apps → Frameworks → 主 bundle

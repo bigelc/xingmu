@@ -33,7 +33,7 @@
 
   --home-clock-surface: var(--surface-1);
   --home-note-surface: var(--surface-1);
-  --home-mirror-surface: var(--surface-1);
+
   --home-clip-surface: var(--surface-1);
 
   /* 剪贴板卡片：类型只通过浅描边区分，卡片尺寸统一。 */
@@ -65,7 +65,7 @@
   --note-icon-size: 14px;
   --note-mode-w: 88px;
   --note-task-box-size: 13px;
-  --home-mirror-size: 180px;
+
 
   /* ============ 间距 · 8pt ============ */
   --hairline-w: 1px;
@@ -79,7 +79,7 @@
   --s-6: 24px;
 
   /* ============ 字体 ============ */
-  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'SF Pro Display', 'SF Pro Text',
     'PingFang SC', sans-serif;
   --font-mono: 'SF Mono', ui-monospace, monospace;
   --fs-micro: 9px;
@@ -571,14 +571,11 @@ body {
   color: var(--text-3);
 }
 
-/* ============ 首页 · 中心镜子工作台 ============ */
+/* ============ 首页工作台 ============ */
 .home-bento {
   display: grid;
-  grid-template-columns: 190px 270px minmax(280px, 1fr) 230px;
-  grid-template-rows: var(--home-mirror-size) minmax(0, 1fr);
-  grid-template-areas:
-    "clock windows mirror commands"
-    "recorder windows note commands";
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
   gap: var(--s-3);
   height: 100%;
 }
@@ -588,7 +585,6 @@ body {
 .home-recorder { grid-area: recorder; }
 .home-commands { grid-area: commands; }
 .home-note     { grid-area: note; }
-.home-mirror   { grid-area: mirror; }
 .home-clipfav  { grid-area: clipfav; }
 
 /* 时钟·日期 */
@@ -1069,121 +1065,6 @@ body {
   font-weight: 500;
   letter-spacing: 0.4px;
   color: var(--text-3);
-}
-
-/* 镜子 */
-.home-mirror {
-  width: var(--home-mirror-size);
-  height: var(--home-mirror-size);
-  aspect-ratio: 1;
-  place-self: center;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-1);
-  min-width: 0;
-  min-height: 0;
-  background: var(--home-mirror-surface);
-  overflow: hidden;
-}
-
-.mirror-stage {
-  width: 100%;
-  height: 100%;
-  border-radius: var(--r-tile);
-  overflow: hidden;
-  position: relative;
-  padding: 0;
-  border: none;
-  background: var(--surface-2);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mirror-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1) scale(var(--mirror-zoom, 1));
-  display: block;
-  opacity: 0;
-  transition: opacity var(--d-base) var(--ease-out);
-}
-
-.mirror-zoom {
-  position: absolute;
-  top: var(--s-2);
-  right: var(--s-2);
-  z-index: 2;
-  padding: 3px 6px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-pill);
-  background: rgba(0, 0, 0, 0.62);
-  color: var(--text-2);
-  font: var(--fs-micro) var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  opacity: 0;
-  transform: translateY(-3px);
-  transition: opacity var(--d-fast) var(--ease), transform var(--d-fast) var(--ease);
-  pointer-events: none;
-}
-
-.mirror-stage:hover .mirror-zoom,
-.mirror-stage:focus-visible .mirror-zoom {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.home-mirror.live .mirror-video {
-  opacity: 1;
-}
-
-.home-mirror.live .mirror-placeholder {
-  opacity: 0;
-}
-
-.mirror-placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--text-3);
-  transition: opacity var(--d-fast) var(--ease);
-}
-
-.mirror-placeholder svg {
-  width: 30px;
-  height: 30px;
-}
-
-.mirror-label {
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.4px;
-  color: var(--text-3);
-}
-
-.mirror-hint {
-  font-size: 10.5px;
-  font-weight: 400;
-  letter-spacing: 0.2px;
-  color: var(--text-4);
-  text-align: center;
-  max-width: 160px;
-  padding: 0 var(--s-3);
-}
-
-.home-mirror.live .mirror-hint {
-  visibility: hidden;
 }
 
 /* ============ 首页 · 收藏剪贴竖列 ============ */
@@ -2578,9 +2459,6 @@ body {
 }
 
 @media (max-width: 900px) {
-  :root {
-    --home-mirror-size: 160px;
-  }
 
   .home-bento {
     grid-template-columns: 150px 190px minmax(200px, 1fr) 180px;
@@ -2764,8 +2642,7 @@ body {
 .home-windows,
 .home-recorder,
 .home-commands,
-.home-note,
-.home-mirror {
+.home-note{
   grid-area: auto;
 }
 
@@ -2847,98 +2724,6 @@ body {
   border-color: rgba(143, 182, 255, .5);
   box-shadow: inset 0 0 0 1px rgba(143,182,255,.18), 0 14px 34px rgba(0,0,0,.3);
 }
-
-/* 镜子是纯图像卡片，第二层图像只在指针附近参与折射。 */
-.home-mirror {
-  width: auto;
-  height: auto;
-  aspect-ratio: auto;
-  place-self: stretch;
-  padding: 0;
-  background: #08090b;
-}
-
-.mirror-stage {
-  --liquid-x: 50%;
-  --liquid-y: 50%;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: #08090b;
-  outline: none;
-}
-
-.mirror-photo {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: 50% 76%;
-  transform: scale(1.015);
-  transition: transform 700ms var(--ease-out), filter 300ms var(--ease), opacity 220ms var(--ease);
-}
-
-.mirror-video {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  opacity: 0;
-  pointer-events: none;
-  transform: scaleX(-1) scale(var(--mirror-zoom, 1));
-  transform-origin: center;
-  transition: opacity 220ms var(--ease-out), transform 160ms var(--ease-out);
-  will-change: transform;
-}
-
-.home-mirror.live .mirror-photo { opacity: 0; }
-.home-mirror.live .mirror-video { opacity: 1; }
-.home-mirror.live .mirror-liquid-layer { opacity: 0; }
-.home-mirror.live .mirror-stage { cursor: zoom-in; }
-.home-mirror.camera-starting .mirror-photo:first-child {
-  filter: brightness(.82) saturate(.88);
-  transform: scale(1.035);
-}
-
-.mirror-liquid-layer {
-  opacity: 0;
-  filter: url(#mirror-liquid-filter) saturate(1.08) contrast(1.03);
-  -webkit-mask-image: radial-gradient(circle 66px at var(--liquid-x) var(--liquid-y), #000 0 34%, rgba(0,0,0,.9) 50%, transparent 74%);
-  mask-image: radial-gradient(circle 66px at var(--liquid-x) var(--liquid-y), #000 0 34%, rgba(0,0,0,.9) 50%, transparent 74%);
-  transform: translate(var(--liquid-shift-x, 0), var(--liquid-shift-y, 0)) scale(1.075);
-  transition: opacity 160ms var(--ease), transform 240ms var(--ease-out);
-}
-
-.home-mirror.liquid-active .mirror-photo:first-child {
-  transform: scale(1.04);
-  filter: saturate(.93) brightness(.93);
-}
-.home-mirror.liquid-active .mirror-liquid-layer { opacity: .92; }
-
-.mirror-ripple {
-  position: absolute;
-  left: var(--liquid-x);
-  top: var(--liquid-y);
-  width: 18px;
-  height: 18px;
-  border: 1px solid rgba(255,255,255,.55);
-  border-radius: 50%;
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(.25);
-  pointer-events: none;
-  z-index: 4;
-}
-.home-mirror.ripple-active .mirror-ripple { animation: mirror-ripple 720ms var(--ease-out); }
-@keyframes mirror-ripple {
-  0% { opacity: .75; transform: translate(-50%, -50%) scale(.35); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(8); }
-}
-.mirror-filter-defs { position: absolute; pointer-events: none; }
 
 /* 距离感应 hover：相邻项目也会轻微抬升，接近 macOS Dock 的连续曲线。 */
 .window-app-mark {
@@ -3113,47 +2898,6 @@ body {
   box-shadow: 0 0 calc(12px + var(--recording-level, 0) * 24px) rgba(255,95,87,.7);
 }
 
-/* ============ 镜子 PixelReveal + 带尾迹水波 ============ */
-.mirror-water-canvas,
-.mirror-pixel-reveal {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-.mirror-water-canvas { mix-blend-mode: screen; opacity: .92; }
-.mirror-pixel-reveal {
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  grid-template-rows: repeat(8, 1fr);
-  overflow: hidden;
-  opacity: 0;
-}
-.mirror-pixel-reveal i {
-  display: block;
-  background: #090a0d;
-  transform: scale(0);
-  transform-origin: center;
-}
-.mirror-pixel-reveal.revealing { opacity: 1; }
-.mirror-pixel-reveal.revealing i {
-  animation: mirror-pixel-away 620ms var(--ease-out) both;
-  animation-delay: var(--pixel-delay);
-}
-@keyframes mirror-pixel-away {
-  0% { opacity: 1; transform: scale(1.08); }
-  62% { opacity: .88; transform: scale(.72); }
-  100% { opacity: 0; transform: scale(0); }
-}
-.mirror-liquid-layer {
-  -webkit-mask-image: radial-gradient(circle 92px at var(--liquid-x) var(--liquid-y), #000 0 30%, rgba(0,0,0,.94) 50%, rgba(0,0,0,.38) 72%, transparent 100%);
-  mask-image: radial-gradient(circle 92px at var(--liquid-x) var(--liquid-y), #000 0 30%, rgba(0,0,0,.94) 50%, rgba(0,0,0,.38) 72%, transparent 100%);
-  transition: opacity 240ms var(--ease), transform 420ms var(--ease-out);
-}
-.home-mirror.liquid-active .mirror-liquid-layer { opacity: 1; }
-
 /* ============ 可编辑待办分类 ============ */
 .todo-category-name {
   min-width: 0;
@@ -3200,86 +2944,6 @@ body {
     scroll-behavior: auto;
   }
 }
-
-/* ============ 本地音乐组件 · macOS Now Playing ============ */
-.home-music {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 10px 13px;
-  align-items: center;
-  padding: 15px;
-  background:
-    radial-gradient(90% 120% at 8% 100%, rgba(99, 255, 171, .105), transparent 58%),
-    radial-gradient(100% 100% at 100% 0%, rgba(132, 160, 255, .085), transparent 62%),
-    linear-gradient(150deg, rgba(30,31,34,.97), rgba(13,14,16,.97));
-  cursor: pointer;
-}
-.music-artwork-shell { grid-row: 1 / 3; position: relative; width: 58px; height: 58px; }
-.music-artwork {
-  position: relative;
-  z-index: 2;
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border-radius: 17px;
-  background: rgba(8,9,10,.9);
-  color: rgba(255,255,255,.88);
-  font-size: 21px;
-  font-weight: 680;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), inset 0 1px 0 rgba(255,255,255,.12), 0 14px 28px rgba(0,0,0,.34);
-}
-.music-artwork img { width: 78%; height: 78%; object-fit: contain; border-radius: 13px; }
-.music-pulse { position: absolute; inset: -8px; display: flex; align-items: flex-end; justify-content: center; gap: 3px; opacity: 0; filter: blur(.1px); transition: opacity 220ms var(--ease); }
-.music-pulse i { width: 3px; height: 12px; border-radius: 99px; background: linear-gradient(#baffd1, #55e68a); transform-origin: center bottom; animation: music-pulse 760ms ease-in-out infinite alternate; }
-.music-pulse i:nth-child(2) { height: 19px; animation-delay: -420ms; }
-.music-pulse i:nth-child(3) { height: 15px; animation-delay: -180ms; }
-.music-pulse i:nth-child(4) { height: 9px; animation-delay: -590ms; }
-.music-playing .music-pulse { opacity: .58; }
-@keyframes music-pulse { from { transform: scaleY(.35); opacity:.35; } to { transform: scaleY(1); opacity:.92; } }
-.music-copy { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
-.music-copy strong,
-.music-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.music-kicker { color: rgba(177,255,207,.62); font: 7px/1.2 var(--font-mono); letter-spacing: 1.15px; }
-.music-copy strong { color: var(--text-1); font-size: 14px; font-weight: 640; letter-spacing: -.2px; }
-.music-copy > span:last-child { color: var(--text-3); font-size: 9px; }
-.music-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.music-controls button {
-  width: 25px;
-  height: 25px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(255,255,255,.055);
-  color: rgba(255,255,255,.8);
-  cursor: pointer;
-  transition: transform 160ms var(--ease-spring), background 140ms var(--ease);
-}
-.music-controls button:hover { transform: scale(1.08); background: rgba(255,255,255,.12); }
-.music-controls .music-play { width: 31px; height: 31px; background: rgba(246,247,248,.94); color: #121315; box-shadow: 0 7px 18px rgba(0,0,0,.28); }
-.music-controls svg { width: 15px; height: 15px; fill: currentColor; }
-.home-music[data-widget-size='small'] {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 16px 12px;
-  gap: 11px;
-  text-align: center;
-}
-.home-music[data-widget-size='small'] .music-artwork-shell,
-.home-music[data-widget-size='small'] .music-artwork { width: 68px; height: 68px; border-radius: 19px; }
-.home-music[data-widget-size='small'] .music-artwork-shell { width: 68px; height: 68px; }
-.home-music[data-widget-size='small'] .music-kicker,
-.home-music[data-widget-size='small'] #music-status { display: none; }
-.home-music[data-widget-size='small'] .music-copy { align-items: center; }
-.home-music[data-widget-size='small'] .music-copy strong { font-size: 13px; }
-.home-music[data-widget-size='small'] .music-controls { justify-content: center; gap: 3px; }
-.home-music[data-widget-size='small'] .music-controls button:not(.music-play) { display: none; }
 
 /* ============ 面板内截止时间选择器与单行待办 ============ */
 .todo-item { display: grid; grid-template-columns: 25px minmax(0, 1fr) 22px; align-items: center; gap: 7px; }
@@ -3411,16 +3075,9 @@ body {
 .home-commands[data-widget-size='mini'] .command-add,
 .home-commands[data-widget-size='mini'] .command-list,
 .home-note[data-widget-size='mini'] .note-body,
-.home-note[data-widget-size='mini'] .note-format-actions,
-.home-mirror[data-widget-size='mini'] .mirror-stage { display: none; }
-.home-mirror[data-widget-size='mini']::before { content: '镜子'; color: var(--text-2); font-size: 10px; }
+.home-note[data-widget-size='mini'] .note-format-actions{ display: none; }
 .home-recorder[data-widget-size='mini'] .recorder-head { overflow: hidden; white-space: nowrap; }
 .home-recorder[data-widget-size='mini'] .recorder-controls { left: 10px; bottom: 8px; transform: scale(.78); transform-origin: left bottom; }
-.home-music[data-widget-size='mini'] { display: grid; place-items: center; padding: 8px; }
-.home-music[data-widget-size='mini'] .music-copy,
-.home-music[data-widget-size='mini'] .music-controls button:not(.music-play) { display: none; }
-.home-music[data-widget-size='mini'] .music-artwork-shell,
-.home-music[data-widget-size='mini'] .music-artwork { width: 46px; height: 46px; border-radius: 13px; }
 
 /* ============ 时间电量与统一多选 ============ */
 .todo-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -3541,7 +3198,7 @@ body {
   gap: var(--s-3);
 }
 .settings-column-primary { grid-template-rows: 154px minmax(0, 1fr); }
-.settings-column-secondary { grid-template-rows: 190px minmax(0, 1fr); }
+.settings-column-secondary { grid-template-rows: minmax(0, 1fr); }
 .settings-card {
   min-width: 0;
   min-height: 0;
@@ -3554,8 +3211,7 @@ body {
 }
 .settings-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-3); }
 .settings-card-heading > div { display: flex; flex-direction: column; gap: 3px; }
-.settings-card-heading strong,
-.settings-mirror-card strong { color: var(--text-1); font-size: 16px; font-weight: 640; }
+.settings-card-heading strong{ color: var(--text-1); font-size: 16px; font-weight: 640; }
 .settings-card-heading > small { color: var(--text-4); font-size: 9px; }
 .settings-card p { margin: 0; color: var(--text-4); font-size: 9px; line-height: 1.55; }
 
@@ -3588,11 +3244,6 @@ body {
 .settings-feature-grid input:disabled + i,
 .settings-auto-launch-row input:disabled + i { opacity: .45; }
 
-.settings-mirror-card { display: grid; grid-template-columns: 154px minmax(0,1fr); align-items: center; gap: 18px; }
-.settings-mirror-card img { width: 154px; height: 154px; border-radius: 16px; object-fit: cover; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 12px 32px rgba(0,0,0,.28); }
-.settings-mirror-card > div { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
-.settings-mirror-card p { max-width: 250px; }
-
 .settings-device-card { display: flex; flex-direction: column; }
 .settings-device-row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 60px; border-bottom: 1px solid var(--hairline-soft); }
 .settings-device-row > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -3601,6 +3252,23 @@ body {
 .settings-device-row em { color: #8eb2ff; font-style: normal; }
 .settings-device-row button { flex: 0 0 auto; min-height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: rgba(255,255,255,.06); color: var(--text-3); font: 9px var(--font); cursor: pointer; transition: background var(--d-fast) var(--ease), color var(--d-fast) var(--ease); }
 .settings-device-row button:hover { background: rgba(255,255,255,.11); color: var(--text-1); }
+.settings-default-tab-row { cursor: pointer; }
+.settings-default-tab-row select {
+  flex: 0 0 auto;
+  min-width: 112px;
+  height: 30px;
+  padding: 0 28px 0 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 9px;
+  background: rgba(255,255,255,.06);
+  color: var(--text-2);
+  font: 10px var(--font);
+  color-scheme: dark;
+  cursor: pointer;
+}
+.settings-default-tab-row select:hover { background-color: rgba(255,255,255,.1); color: var(--text-1); }
+.settings-default-tab-row select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.settings-default-tab-row select:disabled { opacity: .5; cursor: default; }
 .settings-workspace-row > div { flex: 1 1 auto; }
 .settings-workspace-path { max-width: 290px; }
 .settings-device-actions { flex: 0 0 auto; display: flex; gap: 6px; }
@@ -3707,10 +3375,10 @@ body {
   z-index: 3;
   width: 100%;
   max-width: none;
-  padding: 0 84px 0 8px;
+  padding: 0 8px;
   overflow: visible;
 }
-.topbar > .tabs:not(.is-split) { right: auto; width: max-content; max-width: calc(100% - 84px); padding-right: 8px; }
+.topbar > .tabs:not(.is-split) { right: auto; width: max-content; }
 .topbar > .tabs.is-split {
   background: transparent;
   border-color: transparent;
@@ -3727,48 +3395,6 @@ body {
 .topbar-mid { position:absolute; inset:4px 8px auto auto; z-index:6; }
 .topbar-actions { display: none !important; }
 
-.app-quit-button {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  z-index: 7;
-  min-width: 60px;
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid rgba(255, 138, 130, .22);
-  border-radius: var(--r-pill);
-  background: rgba(255, 138, 130, .08);
-  color: #ffb1ab;
-  font: 11px var(--font);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.app-quit-button:hover { background: rgba(255, 138, 130, .16); color: #ffd3cf; }
-[data-app-quit]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-[data-app-quit]:disabled { opacity: .6; cursor: wait; }
-.app-quit-status {
-  position: absolute;
-  top: 44px;
-  right: 16px;
-  z-index: 100;
-  max-width: min(430px, calc(100% - 32px));
-  margin: 0;
-  padding: 10px 14px;
-  border: 1px solid rgba(255, 138, 130, .28);
-  border-radius: 12px;
-  background: #302222;
-  color: #ffd3cf;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .3);
-  font: 12px/1.55 var(--font);
-}
-.app-quit-status[hidden] { display: none; }
-.settings-column-secondary { display: flex; flex-direction: column; overflow-y: auto; }
-.settings-column-secondary > .settings-card { flex: 0 0 auto; }
-.settings-quit-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.settings-quit-card > div { display: flex; flex-direction: column; gap: 5px; }
-.settings-quit-card strong { color: var(--text-1); font-size: 13px; font-weight: 600; }
-.settings-quit-card [data-app-quit] { flex: 0 0 auto; color: #ffb1ab; }
-
 /* 模块尺寸按钮固定在右下角，避免争夺标题区。 */
 .widget-size-control,
 [data-widget-size='mini'] .widget-size-control {
@@ -3776,27 +3402,6 @@ body {
   right: 7px;
   bottom: 7px;
 }
-
-/* 汽水音乐：同一视觉语言的四套裁切资产，按钮始终可见。 */
-.home-music {
-  isolation: isolate;
-  background-image: linear-gradient(rgba(6,9,9,.22), rgba(6,9,9,.22)), url('assets/generated/music-bg-medium.png');
-  background-size: cover;
-  background-position: center;
-}
-.home-music[data-widget-size='mini'] { background-image: linear-gradient(rgba(6,9,9,.16), rgba(6,9,9,.16)), url('assets/generated/music-bg-mini.png'); }
-.home-music[data-widget-size='small'] { background-image: linear-gradient(rgba(6,9,9,.2), rgba(6,9,9,.2)), url('assets/generated/music-bg-small.png'); }
-.home-music[data-widget-size='large'] { background-image: linear-gradient(rgba(6,9,9,.24), rgba(6,9,9,.24)), url('assets/generated/music-bg-large.png'); }
-.home-music::after { content:''; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(0,0,0,.3),transparent 55%); pointer-events:none; }
-.home-music .music-controls button,
-.home-music[data-widget-size='small'] .music-controls button:not(.music-play),
-.home-music[data-widget-size='mini'] .music-controls button:not(.music-play) { display: grid; place-items: center; }
-.home-music[data-widget-size='mini'] { grid-template-columns: 38px 1fr; grid-template-rows: 1fr; gap: 8px; place-items: center; }
-.home-music[data-widget-size='mini'] .music-artwork-shell,
-.home-music[data-widget-size='mini'] .music-artwork { width: 36px; height: 36px; border-radius: 11px; }
-.home-music[data-widget-size='mini'] .music-controls { display:flex; gap:2px; }
-.home-music[data-widget-size='mini'] .music-controls button { width:22px; height:22px; }
-.home-music[data-widget-size='mini'] .music-controls .music-play { width:28px; height:28px; }
 
 /* 番茄钟有可验证的时长设置、进度与四档背景。 */
 .home-pomodoro {
@@ -3852,7 +3457,7 @@ body {
 .credential-inline-fields input { width:100%; height:32px; padding:0 9px; border:0; border-radius:10px; outline:none; background:rgba(255,255,255,.055); color:var(--text-1); }
 .credential-inline-editor > button { align-self:end; }
 
-/* ============ TO-DO Panel · final compact component pass ============ */
+/* ============ 醒目-个人效率工作台 · final compact component pass ============ */
 .shortcut-recorder {
   position: absolute;
   top: 52px;
@@ -3878,46 +3483,6 @@ body {
 .shortcut-recorder kbd { justify-self: end; padding: 5px 8px; border-radius: 9px; background: rgba(255,255,255,.08); color: #cbd9ff; font: 10px var(--font-mono); }
 .shortcut-recorder small { color: var(--text-4); font-size: 8px; line-height: 1.4; }
 .shortcut-recorder button { border: 0; background: transparent; color: var(--text-3); font: 9px var(--font); cursor: pointer; }
-
-/* 汽水音乐在四档尺寸中保持完全相同的信息顺序：Logo、名称、三枚控制键。 */
-.home-music,
-.home-music[data-widget-size='mini'],
-.home-music[data-widget-size='small'],
-.home-music[data-widget-size='medium'],
-.home-music[data-widget-size='large'] {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(5px, 1.25vh, 10px);
-  padding: 10px 12px;
-  text-align: center;
-}
-.home-music::after { background: radial-gradient(circle at 50% 42%, rgba(78,235,156,.09), transparent 56%), linear-gradient(rgba(0,0,0,.1), rgba(0,0,0,.25)); }
-.home-music .music-artwork-shell,
-.home-music .music-artwork,
-.home-music[data-widget-size='mini'] .music-artwork-shell,
-.home-music[data-widget-size='mini'] .music-artwork,
-.home-music[data-widget-size='small'] .music-artwork-shell,
-.home-music[data-widget-size='small'] .music-artwork {
-  width: clamp(36px, 5.5vh, 56px);
-  height: clamp(36px, 5.5vh, 56px);
-  flex: 0 0 auto;
-  border-radius: 16px;
-}
-.home-music .music-copy,
-.home-music[data-widget-size='mini'] .music-copy { display: flex; align-items: center; min-height: 13px; }
-.home-music .music-copy strong { font-size: clamp(10px, 1.45vh, 13px); }
-.home-music .music-controls,
-.home-music[data-widget-size='mini'] .music-controls { display: flex; justify-content: center; gap: 5px; }
-.home-music .music-controls button,
-.home-music[data-widget-size='mini'] .music-controls button,
-.home-music[data-widget-size='mini'] .music-controls .music-play {
-  width: clamp(23px, 3.8vh, 30px);
-  height: clamp(23px, 3.8vh, 30px);
-  display: grid;
-}
-.home-music .music-controls .music-play { width: clamp(28px, 4.5vh, 36px); height: clamp(28px, 4.5vh, 36px); }
 
 /* 番茄钟保持三段时间与控制键的统一居中排版，不随组件尺寸改版。 */
 .home-pomodoro,
@@ -3972,8 +3537,7 @@ body {
 /* 最小组件仍是“摘要态”，而不是把主体隐藏后留下空壳。 */
 .home-windows[data-widget-size='mini'] .window-list,
 .home-commands[data-widget-size='mini'] .command-list,
-.home-note[data-widget-size='mini'] .note-body,
-.home-mirror[data-widget-size='mini'] .mirror-stage { display: flex; }
+.home-note[data-widget-size='mini'] .note-body{ display: flex; }
 .home-windows[data-widget-size='mini'] { padding: 9px; }
 .home-windows[data-widget-size='mini'] .tile-head { margin-bottom: 3px; }
 .home-windows[data-widget-size='mini'] .window-list { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 2px; overflow: hidden; }
@@ -3995,9 +3559,6 @@ body {
 .home-note[data-widget-size='mini'] .note-body { min-height: 0; overflow: hidden; }
 .home-note[data-widget-size='mini'] .note-input { display: none !important; }
 .home-note[data-widget-size='mini'] .note-preview { display: -webkit-box !important; overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; font-size: 8px; line-height: 1.35; }
-.home-mirror[data-widget-size='mini'] { padding: 0; }
-.home-mirror[data-widget-size='mini']::before { content: none; }
-.home-mirror[data-widget-size='mini'] .mirror-stage { width: 100%; height: 100%; }
 
 /* 2026-08-22：随手输入、紧凑日期浮层与录音控制最终层。 */
 .home-recorder {
@@ -4089,12 +3650,7 @@ body {
 .todo-date-popover #todo-editor-error { min-height: 0; margin: 5px 0 0; font-size: 8px; }
 
 /* ============ Vue Bits inspired motion + radius audit ============ */
-/* 两个首页背景由本地 WebGL 绘制，切换组件尺寸时无需替换图片。 */
-.home-music,
-.home-music[data-widget-size='mini'],
-.home-music[data-widget-size='small'],
-.home-music[data-widget-size='medium'],
-.home-music[data-widget-size='large'],
+/* 番茄钟背景与控件层级。 */
 .home-pomodoro,
 .home-pomodoro[data-widget-size='mini'],
 .home-pomodoro[data-widget-size='small'],
@@ -4103,31 +3659,12 @@ body {
   background-image: none;
   background-color: #08090a;
 }
-.home-music.effect-fallback {
-  background: radial-gradient(circle at 22% 70%, rgba(41,223,157,.28), transparent 48%),
-    radial-gradient(circle at 78% 24%, rgba(128,75,255,.25), transparent 48%), #08090a;
-}
 .home-pomodoro.effect-fallback {
   background: linear-gradient(145deg, rgba(44,61,50,.42), rgba(236,72,153,.12)), #08090a;
 }
-.module-effect-canvas {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  pointer-events: none;
-}
-.home-music > :not(.module-effect-canvas),
-.home-pomodoro > :not(.module-effect-canvas) {
+.home-pomodoro > * {
   position: relative;
   z-index: 2;
-}
-.home-music::after {
-  z-index: 1;
-  background: radial-gradient(circle at 50% 42%, rgba(0,0,0,.02), transparent 50%),
-    linear-gradient(180deg, rgba(0,0,0,.03), rgba(0,0,0,.26));
 }
 .home-pomodoro::after {
   z-index: 1;
@@ -4375,11 +3912,9 @@ body {
   font-size: clamp(22px, 4.2vh, 34px);
 }
 
-/* ============ 首页播放器与计时器 · 参考图精确排版 ============ */
-/* effects.js 会给直接子元素补层级；尺寸按钮必须始终脱离内容流并贴右下角。 */
-.home-music > .widget-size-control,
+/* ============ 首页计时器排版 ============ */
+/* 尺寸按钮脱离内容流并贴右下角。 */
 .home-pomodoro > .widget-size-control,
-.home-music[data-widget-size] > .widget-size-control,
 .home-pomodoro[data-widget-size] > .widget-size-control {
   position: absolute;
   /* 绝对定位元素若残留 grid-area，会以网格单元而不是整个模块为包含块。 */
@@ -4393,119 +3928,6 @@ body {
   z-index: 20;
   width: 24px;
   height: 24px;
-}
-
-/* 汽水音乐：放弃封面，动态背景上只保留左下标题与右下毛玻璃控制组。 */
-.home-music,
-.home-music[data-widget-size='mini'],
-.home-music[data-widget-size='small'],
-.home-music[data-widget-size='medium'],
-.home-music[data-widget-size='large'] {
-  position: relative;
-  display: block;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-}
-.home-music > .music-copy,
-.home-music[data-widget-size] > .music-copy {
-  position: absolute;
-  left: clamp(11px, 1.6vw, 18px);
-  right: 152px;
-  bottom: clamp(11px, 1.7vh, 17px);
-  z-index: 4;
-  display: block;
-  min-height: 0;
-  pointer-events: none;
-}
-.home-music .music-copy strong {
-  display: block;
-  overflow: hidden;
-  color: rgba(255,255,255,.96);
-  font-family: "PingFang SC", "Hiragino Sans GB", var(--font);
-  font-size: clamp(12px, 1.9vh, 17px);
-  font-weight: 760;
-  line-height: 1.1;
-  letter-spacing: -.035em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-shadow: 0 2px 12px rgba(0,0,0,.48);
-}
-.home-music > .music-controls,
-.home-music[data-widget-size] > .music-controls {
-  position: absolute;
-  right: 39px;
-  bottom: 8px;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
-}
-.home-music .music-controls button,
-.home-music[data-widget-size] .music-controls button,
-.home-music[data-widget-size] .music-controls .music-play {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(255,255,255,.16);
-  border-radius: 50%;
-  background: linear-gradient(145deg, rgba(255,255,255,.18), rgba(255,255,255,.075));
-  color: rgba(255,255,255,.92);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 7px 18px rgba(0,0,0,.24);
-  backdrop-filter: blur(18px) saturate(1.35);
-  -webkit-backdrop-filter: blur(18px) saturate(1.35);
-}
-.home-music .music-controls .music-play {
-  width: 34px;
-  height: 34px;
-  background: linear-gradient(145deg, rgba(255,255,255,.3), rgba(255,255,255,.13));
-  color: #fff;
-}
-.home-music .music-controls button:hover {
-  background: linear-gradient(145deg, rgba(255,255,255,.3), rgba(255,255,255,.13));
-  border-color: rgba(255,255,255,.25);
-}
-.home-music[data-widget-size='mini'] > .music-copy {
-  left: 10px;
-  right: 114px;
-  bottom: 10px;
-}
-.home-music[data-widget-size='mini'] .music-copy strong { font-size: 10px; }
-.home-music[data-widget-size='mini'] > .music-controls {
-  right: 34px;
-  bottom: 6px;
-  gap: 2px;
-}
-.home-music[data-widget-size='mini'] .music-controls button,
-.home-music[data-widget-size='mini'] .music-controls .music-play {
-  width: 23px;
-  height: 23px;
-}
-.home-music[data-widget-size='mini'] .music-controls .music-play {
-  width: 27px;
-  height: 27px;
-}
-.home-music[data-widget-size='small'] > .music-copy {
-  left: 10px;
-  right: 114px;
-  bottom: 11px;
-}
-.home-music[data-widget-size='small'] .music-copy strong { font-size: 11px; }
-.home-music[data-widget-size='small'] > .music-controls {
-  right: 34px;
-  bottom: 7px;
-  gap: 2px;
-}
-.home-music[data-widget-size='small'] .music-controls button,
-.home-music[data-widget-size='small'] .music-controls .music-play {
-  width: 23px;
-  height: 23px;
-}
-.home-music[data-widget-size='small'] .music-controls .music-play {
-  width: 27px;
-  height: 27px;
 }
 
 /* 番茄钟：SVG 就是模块自身描边，不再创建第二层圆角卡片。 */
@@ -4788,29 +4210,6 @@ body {
 .home-pomodoro[data-widget-size='large'] .pomodoro-dial span { font-size: 72px; }
 .home-pomodoro[data-widget-size='large'] > .pomodoro-toggle,
 .home-pomodoro[data-widget-size='large'] > .pomodoro-reset { width: 68px; height: 68px; }
-
-/* 汽水音乐：四个比例各自匹配标题层级，并明确区分三枚控制图标。 */
-.home-music[data-widget-size] > .music-copy { display: block !important; }
-.home-music[data-widget-size] .music-controls button { display: grid !important; }
-.home-music .music-controls svg { width: 15px; height: 15px; }
-.home-music .music-controls button:not(.music-play) svg { fill: none; }
-.home-music .music-controls .music-play svg { fill: currentColor; stroke: none; }
-.home-music[data-widget-size='mini'] .music-copy strong { font-size: 13px; }
-.home-music[data-widget-size='small'] .music-copy strong { font-size: 17px; }
-.home-music[data-widget-size='medium'] .music-copy strong { font-size: 22px; }
-.home-music[data-widget-size='large'] .music-copy strong { font-size: 34px; }
-.home-music[data-widget-size='small'] > .music-copy,
-.home-music[data-widget-size='medium'] > .music-copy {
-  top: 20px;
-  right: 20px;
-  bottom: auto;
-  left: 20px;
-}
-.home-music[data-widget-size='large'] > .music-copy { right: 190px; bottom: 24px; left: 24px; }
-.home-music[data-widget-size='large'] > .music-controls { right: 46px; bottom: 17px; gap: 7px; }
-.home-music[data-widget-size='large'] .music-controls button { width: 40px; height: 40px; }
-.home-music[data-widget-size='large'] .music-controls .music-play { width: 46px; height: 46px; }
-.home-music[data-widget-size='large'] .music-controls svg { width: 19px; height: 19px; }
 
 /* 日期浮层永远属于当前象限，而不是按整块面板定位。 */
 .quadrant { position: relative; }
@@ -5207,50 +4606,6 @@ body {
 .home-bento > [data-layout-variant='tall'],
 .home-bento > [data-layout-variant='full'] { align-content: stretch; }
 
-/* 音乐：控制键尺寸固定，容器增大时只增加标题与背景的呼吸空间。 */
-.home-bento > .home-music[data-layout-variant] { position: relative; display: block; padding: 0; }
-.home-bento > .home-music[data-layout-variant] > .music-copy {
-  position: absolute;
-  z-index: 4;
-  display: block !important;
-  min-width: 0;
-  pointer-events: none;
-}
-.home-bento > .home-music[data-layout-variant] > .music-controls {
-  position: absolute;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-.home-bento > .home-music[data-layout-variant] .music-controls button { display: grid !important; width: 30px; height: 30px; }
-.home-bento > .home-music[data-layout-variant] .music-controls .music-play { width: 34px; height: 34px; }
-.home-bento > .home-music[data-layout-variant='mini'] > .music-copy {
-  left: 9px; right: 106px; bottom: 9px;
-}
-.home-bento > .home-music[data-layout-variant='mini'] .music-copy strong { font-size: 10px; }
-.home-bento > .home-music[data-layout-variant='mini'] > .music-controls { right: 31px; bottom: 5px; gap: 2px; }
-.home-bento > .home-music[data-layout-variant='mini'] .music-controls button { width: 23px; height: 23px; }
-.home-bento > .home-music[data-layout-variant='mini'] .music-controls .music-play { width: 27px; height: 27px; }
-.home-bento > .home-music[data-layout-variant='compact'] > .music-copy {
-  top: 16px; right: 14px; bottom: auto; left: 14px;
-}
-.home-bento > .home-music[data-layout-variant='compact'] .music-copy strong { font-size: 14px; }
-.home-bento > .home-music[data-layout-variant='compact'] > .music-controls { right: 34px; bottom: 12px; gap: 3px; }
-.home-bento > .home-music[data-layout-variant='wide'] > .music-copy {
-  top: 18px; right: 150px; bottom: auto; left: 18px;
-}
-.home-bento > .home-music[data-layout-variant='wide'] .music-copy strong { font-size: 18px; }
-.home-bento > .home-music[data-layout-variant='wide'] > .music-controls { right: 38px; bottom: 12px; gap: 5px; }
-.home-bento > .home-music[data-layout-variant='tall'] > .music-copy,
-.home-bento > .home-music[data-layout-variant='full'] > .music-copy {
-  left: 22px; right: 170px; bottom: 22px; top: auto;
-}
-.home-bento > .home-music[data-layout-variant='tall'] .music-copy strong,
-.home-bento > .home-music[data-layout-variant='full'] .music-copy strong { font-size: 24px; }
-.home-bento > .home-music[data-layout-variant='tall'] > .music-controls,
-.home-bento > .home-music[data-layout-variant='full'] > .music-controls { right: 42px; bottom: 16px; gap: 6px; }
-
 /* 番茄钟：根据实际宽高切换三列或纵向，数字和按钮不做整体缩放。 */
 .home-bento > .home-pomodoro[data-layout-variant] { display: grid; align-items: center; justify-items: center; overflow: hidden; }
 .home-bento > .home-pomodoro[data-layout-variant] > .pomodoro-readout,
@@ -5315,7 +4670,7 @@ body {
 .home-bento > .home-pomodoro[data-layout-variant='full'] > .pomodoro-toggle,
 .home-bento > .home-pomodoro[data-layout-variant='full'] > .pomodoro-reset { width: 46px; height: 46px; }
 
-/* 录音、列表、笔记和镜子都在容器内部消化增量空间。 */
+/* 录音、列表和笔记在容器内部消化增量空间。 */
 .home-bento > .home-recorder[data-layout-variant] { position: relative; display: flex; flex-direction: column; padding-bottom: 52px; }
 .home-bento > .home-recorder[data-layout-variant] .recorder-head { min-width: 0; overflow: hidden; }
 .home-bento > .home-recorder[data-layout-variant] .home-transcript { min-width: 0; min-height: 0; overflow: hidden; }
@@ -5360,11 +4715,6 @@ body {
 .home-bento > .home-note[data-layout-variant] .note-persist-actions { transform: none; }
 .home-bento > .home-note[data-layout-variant='mini'] { padding: 8px; }
 .home-bento > .home-note[data-layout-variant='mini'] .note-input { font-size: 8px; line-height: 1.42; padding: 2px; }
-
-.home-bento > .home-mirror[data-layout-variant] { padding: 0; }
-.home-bento > .home-mirror[data-layout-variant] .mirror-stage { display: block; width: 100%; height: 100%; }
-.home-bento > .home-mirror[data-layout-variant] .mirror-video,
-.home-bento > .home-mirror[data-layout-variant] .mirror-photo { width: 100%; height: 100%; object-fit: cover; }
 
 /* 设置左栏允许独立滚动，第三张卡不会挤压或覆盖既有内容。 */
 .settings-column-primary {

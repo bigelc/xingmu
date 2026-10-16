@@ -1,26 +1,7 @@
-# 来源与第三方许可
+# 来源与许可说明
 
-## TO-DO Panel / Dynamic Panel
+醒目-个人效率工作台（Xingmu）是在 TO-DO Panel / Dynamic Panel 的 MIT 许可代码基础上持续修改的衍生项目，由 bigelc 维护。当前仓库为 [bigelc/xingmu](https://github.com/bigelc/xingmu)，上游项目为 [TO-DO Panel](https://github.com/xiaopu-ai/TO-DO-Panel)。
 
-来源：https://github.com/xiaopu-ai/TO-DO-Panel
+本项目保留上游版权与 MIT 许可全文，见 [LICENSE](LICENSE)。新增品牌、界面、AI 新闻、AI 服务配置、账户用量与账单导入等修改不构成对全部代码原创性的声明。历史名称在许可归属、兼容迁移与旧数据标识中保留。
 
-上游源码基线：`e69cccaa27dd13333f6eeee483ac9187bade2299`，在此基础上保留本次实际安装的本地二开内容。
-
-- Copyright (c) 2026 TO-DO Panel contributors
-- Copyright (c) 2026 Dynamic Panel contributors
-- 上游 package.json 作者字段：xiaopu-ai
-- 许可：MIT，完整许可见本仓库 LICENSE。
-
-应用图标、默认镜子素材与其他界面素材继承自上游仓库。默认镜子素材存在于上游初始提交，不是本机用户的镜子封面文件。用户自己的封面、录音、笔记与工作区数据没有进入发布包。
-
-## Electron / Chromium
-
-Electron 44.0.0 使用 MIT License，Chromium 和其组件包含各自许可证。应用 ZIP 中 `THIRD_PARTY_NOTICES/Electron-LICENSE.txt` 与 `THIRD_PARTY_NOTICES/LICENSES.chromium.html` 保留对应完整声明。
-
-Electron：https://github.com/electron/electron
-
-## ws
-
-ws 8.21.3 使用 MIT License，安装包中的 `醒目.app/Contents/Resources/app/node_modules/ws/LICENSE` 保留完整声明。
-
-源码依赖通过 npm 安装，具体依赖版本、来源和许可元数据见 package-lock.json 及各依赖包 LICENSE。
+第三方软件依赖分别遵循其各自许可。AIHOT、模型供应商、新闻来源及其他第三方名称仅用于识别对应服务；本项目的 MIT 许可不授予第三方内容、商标或服务接口的额外使用权。使用相关服务须遵循其条款，商业使用须取得服务方要求的授权。

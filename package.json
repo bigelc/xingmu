@@ -1,14 +1,15 @@
 {
-  "name": "to-do-panel",
-  "version": "1.0.5",
-  "description": "醒目是一款常驻 Mac 屏幕顶部的本地工作台，集待办管理、笔记、链接、录音、番茄钟与任务坐标图于一体。",
+  "name": "xingmu-personal-workbench",
+  "version": "2.0.0",
+  "description": "醒目-个人效率工作台：本地待办、笔记、录音、AI 新闻与多平台 AI 用量管理",
   "main": "main.js",
-  "author": "xiaopu-ai",
+  "author": "bigelc",
   "license": "MIT",
   "scripts": {
+    "test": "node scripts/test-desktop.js",
     "start": "electron .",
-    "test": "node --test tests/*.test.js && node scripts/check-syntax.js",
     "build": "electron-builder --mac dmg --publish never",
+    "build:win": "electron-builder --win nsis --x64 --publish never",
     "build:zip": "electron-builder --mac zip --publish never",
     "pack": "electron-builder --dir --publish never"
   },
@@ -17,22 +18,35 @@
     "electron-builder": "^26.15.7"
   },
   "build": {
-    "appId": "com.dynamicpanel.app.custom",
-    "productName": "醒目",
-    "artifactName": "XingMu-${version}-${arch}.${ext}",
-    "copyright": "© 2026 xiaopu-ai",
+    "appId": "com.bigelc.xingmu",
+    "productName": "醒目-个人效率工作台",
+    "artifactName": "Xingmu-${version}-${arch}.${ext}",
+    "copyright": "© 2026 bigelc; upstream contributors (see LICENSE)",
     "asar": false,
     "directories": {
       "output": "dist.noindex",
       "buildResources": "build"
     },
-    "electronDist": "node_modules/electron/dist",
     "afterPack": "./build/afterPack.js",
     "files": [
       "LICENSE",
       "NOTICE.md",
       "main.js",
+      "profile-directory.js",
       "main-services.js",
+      "news-service.js",
+      "article-service.js",
+      "news-translation-service.js",
+      "ai-providers.js",
+      "ai-settings.js",
+      "ai-client.js",
+      "ai-usage.js",
+      "account-usage.js",
+      "ai-usage-import.js",
+      "electron-article-fetch.js",
+      "news-network.js",
+      "platform.js",
+      "build/xingmu-icon.png",
       "preload.js",
       "renderer/**/*",
       "scripts/codex-notify.js",
@@ -44,8 +58,7 @@
       "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}"
     ],
     "mac": {
-      "icon": "build/to-do-panel-icon.icns",
-      "identity": null,
+      "icon": "build/xingmu-icon.icns",
       "category": "public.app-category.productivity",
       "minimumSystemVersion": "13.0",
       "target": [
@@ -62,16 +75,38 @@
       "entitlementsInherit": "build/entitlements.mac.plist",
       "darkModeSupport": true,
       "extendInfo": {
-        "LSUIElement": false,
+        "LSUIElement": true,
         "NSHighResolutionCapable": true,
-        "CFBundleDisplayName": "醒目",
-        "NSCameraUsageDescription": "醒目需要使用摄像头来显示「镜子」预览。",
-        "NSMicrophoneUsageDescription": "醒目需要使用麦克风来录音并生成转写文本。",
-        "NSAppleEventsUsageDescription": "醒目需要控制「系统事件」来枚举并聚焦当前窗口、发送汽水音乐快捷键。"
-      }
+        "CFBundleDisplayName": "醒目-个人效率工作台",
+        "NSMicrophoneUsageDescription": "醒目-个人效率工作台 需要使用麦克风来录音并生成转写文本。",
+        "NSAppleEventsUsageDescription": "醒目-个人效率工作台 需要控制「系统事件」来枚举并聚焦当前窗口、粘贴剪贴板内容。"
+      },
+      "identity": null
+    },
+    "win": {
+      "icon": "build/xingmu-icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Xingmu-${version}-windows-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": false,
+      "deleteAppDataOnUninstall": false
     },
     "dmg": {
-      "title": "醒目 ${version}",
+      "title": "醒目-个人效率工作台 ${version}",
       "iconSize": 100,
       "contents": [
         {
@@ -90,7 +125,6 @@
         "height": 380
       }
     },
-    "buildVersion": "105.9.11",
     "publish": [
       {
         "provider": "github",
@@ -100,17 +134,20 @@
     ]
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.13",
+    "unzipper": "^0.12.5",
     "ws": "^8.21.3"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/bigelc/xingmu.git"
   },
-  "homepage": "https://github.com/bigelc/xingmu",
+  "homepage": "https://bigelc.github.io/xingmu/",
   "bugs": {
     "url": "https://github.com/bigelc/xingmu/issues"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   }
 }

@@ -78,6 +78,60 @@ function cleanTitle(value) {
     .slice(0, 160);
 }
 
+function createForegroundMediaPermissionCoordinator(defaults = {}) {
+  let activeRequests = 0;
+  let layerOwner = null;
+  let restoreAlwaysOnTop = false;
+
+  return {
+    async run({ owner, activate = defaults.activate, track = defaults.track, request }) {
+      if (typeof request !== 'function') throw new TypeError('request must be a function');
+      const updateGuard = typeof track === 'function' ? track : () => {};
+      const targetWindow = owner && typeof owner.isDestroyed === 'function' && !owner.isDestroyed()
+        ? owner
+        : null;
+      const isFirstRequest = activeRequests === 0;
+
+      activeRequests += 1;
+      updateGuard(1);
+      try {
+        // Concurrent media permission requests share one layer lease. Restoring
+        // after the first request would put the panel back above the second TCC prompt.
+        if (isFirstRequest) {
+          layerOwner = targetWindow;
+          restoreAlwaysOnTop = Boolean(
+            targetWindow &&
+            typeof targetWindow.isAlwaysOnTop === 'function' &&
+            targetWindow.isAlwaysOnTop()
+          );
+          if (restoreAlwaysOnTop) targetWindow.setAlwaysOnTop(false);
+        }
+        if (typeof activate === 'function') activate();
+        if (targetWindow && !targetWindow.isDestroyed() && typeof targetWindow.focus === 'function') {
+          targetWindow.focus();
+        }
+        return await request();
+      } finally {
+        activeRequests = Math.max(0, activeRequests - 1);
+        try {
+          if (activeRequests === 0) {
+            const targetToRestore = layerOwner;
+            const shouldRestore = restoreAlwaysOnTop;
+            layerOwner = null;
+            restoreAlwaysOnTop = false;
+            if (shouldRestore && targetToRestore && !targetToRestore.isDestroyed()) {
+              targetToRestore.setAlwaysOnTop(true, 'screen-saver');
+            }
+          }
+        } finally {
+          // Releasing the blur guard must not depend on native window restoration.
+          updateGuard(-1);
+        }
+      }
+    },
+  };
+}
+
 function extractPageTitle(html, fallback) {
   const ogTitle = extractMetaContent(html, 'og:title');
   const titleMatch = String(html || '').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
@@ -310,7 +364,13 @@ function installLocalWebContentsGuards(webContents) {
     || typeof webContents.setWindowOpenHandler !== 'function'
     || typeof webContents.on !== 'function') return false;
   webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  webContents.on('will-navigate', (event) => event.preventDefault());
+  webContents.on('will-navigate', (event, url) => {
+    // Recovery reloads this same trusted local document. Never allow a different
+    // file, query string, external origin or a reload of a non-local document.
+    const current = webContents.getURL?.();
+    if (typeof current === 'string' && current.startsWith('file:') && url === current) return;
+    event.preventDefault();
+  });
   return true;
 }
 
@@ -437,143 +497,82 @@ function createWorkspacePersistenceGate() {
   };
 }
 
-// File operations are injected so the same transaction can be exercised against
-// temporary directories without starting Electron or touching a user profile.
-function createWorkspaceStore({ fs, getRoot, setRoot, getHydrationRequired = () => false, dataFile = 'workspace.json', assetNames = [], maxBytes = 8 * 1024 * 1024 }) {
-  let revision = crypto.randomUUID();
-  let switching = false;
-  const gate = createWorkspacePersistenceGate();
-  const fail = (code) => { throw new Error(code); };
-  const storageIsValid = (storage) => storage && typeof storage === 'object' && !Array.isArray(storage)
-    && Object.values(storage).every((value) => typeof value === 'string')
-    && Buffer.byteLength(JSON.stringify(storage)) <= maxBytes;
+// ============ 待办导入收件箱（todo-inbox） ============
+// 只接收顶层 *.json；点文件留给脚本写临时文件，*.report.json 是本应用写出的报告。
+function isTodoInboxCandidate(name) {
+  const value = String(name || '');
+  return /\.json$/i.test(value) && !value.startsWith('.') && !/\.report\.json$/i.test(value);
+}
 
-  function inspect(root, requireEmpty = false) {
-    try {
-      if (!fs.statSync(root).isDirectory()) return { kind: 'invalid', error: 'invalid_directory' };
-      const file = path.join(root, dataFile);
-      if (!fs.existsSync(file)) {
-        const occupied = requireEmpty && fs.readdirSync(root).some((name) => name !== '.DS_Store');
-        return occupied ? { kind: 'invalid', error: 'directory_not_empty' } : { kind: 'empty', signature: null, localStorage: {} };
-      }
-      if (!fs.lstatSync(file).isFile() || fs.statSync(file).size > maxBytes + 1024 * 1024) {
-        return { kind: 'invalid', error: 'invalid_snapshot' };
-      }
-      const bytes = fs.readFileSync(file);
-      const payload = JSON.parse(bytes.toString('utf8'));
-      if (payload?.version !== 1 || !storageIsValid(payload.localStorage)) return { kind: 'invalid', error: 'invalid_snapshot' };
-      return { kind: 'existing', localStorage: payload.localStorage, signature: crypto.createHash('sha256').update(bytes).digest('hex') };
-    } catch (error) {
-      return { kind: 'invalid', error: 'unreadable_snapshot' };
-    }
+function parseTodoInboxBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer)) return { ok: false, hash: null, error: '无法读取文件' };
+  const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+  const text = buffer.toString('utf8').replace(/^﻿/, '');
+  if (!text.trim()) return { ok: false, hash, error: '文件为空' };
+  try {
+    return { ok: true, hash, payload: JSON.parse(text) };
+  } catch (error) {
+    return { ok: false, hash, error: `JSON 解析失败：${String(error && error.message || error).slice(0, 200)}` };
   }
+}
 
-  function writeSnapshot(root, storage) {
-    const file = path.join(root, dataFile);
-    const temporary = `${file}.${crypto.randomUUID()}.tmp`;
-    try {
-      fs.mkdirSync(root, { recursive: true });
-      fs.writeFileSync(temporary, JSON.stringify({ version: 1, updatedAt: Date.now(), localStorage: storage }, null, 2), { mode: 0o600, flag: 'wx' });
-      fs.renameSync(temporary, file);
-      gate.markWritten(storage, file);
-    } catch (error) {
-      try { fs.unlinkSync(temporary); } catch (cleanupError) {}
-      fail('save_failed');
-    }
+function todoInboxArchiveNames(fileName, now = new Date(), exists = () => false) {
+  const base = path.basename(String(fileName || '')).replace(/\.json$/i, '') || 'todos';
+  const date = now instanceof Date && Number.isFinite(now.getTime()) ? now : new Date();
+  const pad = (value, size = 2) => String(value).padStart(size, '0');
+  const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+    + `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`;
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const stem = `${stamp}-${base}${attempt ? `-${attempt}` : ''}`;
+    const names = { archive: `${stem}.json`, report: `${stem}.report.json` };
+    if (!exists(names.archive) && !exists(names.report)) return names;
   }
+  const stem = `${stamp}-${base}-${crypto.randomUUID()}`;
+  return { archive: `${stem}.json`, report: `${stem}.report.json` };
+}
 
-  function backup(root) {
-    const source = path.join(root, dataFile);
-    if (!fs.existsSync(source)) return null;
-    const directory = path.join(root, 'workspace-backups');
-    const destination = path.join(directory, `workspace-${Date.now()}-${crypto.randomUUID()}.json`);
-    try {
-      fs.mkdirSync(directory, { recursive: true });
-      fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
-      return destination;
-    } catch (error) { fail('backup_failed'); }
-  }
-
+// 渲染层回传的结果只当数据：逐字段截断，报告体积与内容都有上限。
+function buildTodoInboxReport({ fileName, processedAt = Date.now(), result = null, error = '' } = {}) {
+  const clip = (value, limit) => String(value == null ? '' : value).slice(0, limit);
+  const rows = (value) => (Array.isArray(value) ? value : [])
+    .filter((row) => row && typeof row === 'object')
+    .slice(0, 500);
+  const index = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
+  const source = result && typeof result === 'object' ? result : {};
+  const fileError = clip(error || source.error, 500);
+  const imported = fileError ? [] : rows(source.imported).map((row) => ({
+    index: index(row.index),
+    id: clip(row.id, 128),
+    category: clip(row.category, 8),
+    categoryName: clip(row.categoryName, 24),
+    text: clip(row.text, 80),
+    deadline: clip(row.deadline, 40),
+  }));
+  const skipped = rows(source.skipped).map((row) => ({
+    index: index(row.index),
+    ...(row.id ? { id: clip(row.id, 128) } : {}),
+    reason: clip(row.reason, 300),
+  }));
+  const warnings = fileError ? [] : rows(source.warnings).map((row) => ({
+    index: index(row.index),
+    ...(row.id ? { id: clip(row.id, 128) } : {}),
+    message: clip(row.message, 300),
+  }));
+  let status = 'none';
+  if (fileError) status = 'rejected';
+  else if (imported.length && skipped.length) status = 'partial';
+  else if (imported.length) status = 'imported';
+  const time = new Date(processedAt);
   return {
-    inspect,
-    getRevision: () => revision,
-    setSwitching: (value) => { switching = value === true; },
-    acknowledgeHydration(expectedRevision) {
-      if (expectedRevision !== revision) return false;
-      return !getHydrationRequired() || setRoot(getRoot(), false);
-    },
-    load() {
-      const root = getRoot();
-      const requiresHydration = getHydrationRequired();
-      // A fresh Electron profile may not have been created yet.
-      if (!fs.existsSync(root)) return { path: root, revision, exists: false, localStorage: {}, requiresHydration, error: requiresHydration ? 'missing_snapshot' : null };
-      const state = inspect(root);
-      return { path: root, revision, exists: state.kind === 'existing', localStorage: state.localStorage || {}, requiresHydration, error: state.error || (requiresHydration && state.kind !== 'existing' ? 'missing_snapshot' : null) };
-    },
-    save(storage, expectedRevision) {
-      if (switching || getHydrationRequired() || expectedRevision !== revision || !storageIsValid(storage)) return false;
-      const root = getRoot();
-      if (fs.existsSync(root) && inspect(root).kind === 'invalid') return false;
-      const destination = path.join(root, dataFile);
-      if (fs.existsSync(destination) && !gate.shouldWrite(storage, destination)) return true;
-      try { writeSnapshot(root, storage); return true; } catch (error) { return false; }
-    },
-    switchTo(target, storage, expectedRevision, expectedTarget) {
-      const created = [];
-      let committed = false;
-      try {
-        if (expectedRevision !== revision) fail('stale_workspace');
-        if (!storageIsValid(storage)) fail('invalid_storage');
-        const source = path.resolve(getRoot());
-        const destination = fs.realpathSync(target);
-        const canonicalSource = fs.existsSync(source) ? fs.realpathSync(source) : source;
-        if (canonicalSource === destination) return { ok: false, error: 'same_workspace' };
-        if (destination.startsWith(`${canonicalSource}${path.sep}`) || canonicalSource.startsWith(`${destination}${path.sep}`)) fail('nested_workspace');
-        const targetState = inspect(destination, true);
-        if (targetState.kind === 'invalid') fail(targetState.error);
-        if (expectedTarget && (targetState.kind !== expectedTarget.kind || targetState.signature !== expectedTarget.signature)) fail('target_changed');
-        if (fs.existsSync(source) && inspect(source).kind === 'invalid') fail('invalid_source');
-
-        // Save the latest renderer state to its original folder before changing
-        // the active root. Keep the previous disk snapshot as a recovery point.
-        backup(source);
-        writeSnapshot(source, storage);
-        const action = targetState.kind === 'existing' ? 'open' : 'migrate';
-        if (action === 'open') {
-          backup(destination);
-        } else {
-          // An empty destination is the only migration target. Every created
-          // child is tracked so a failed copy/settings write can be rolled back.
-          for (const name of assetNames) {
-            const from = path.join(source, name);
-            const to = path.join(destination, name);
-            if (!fs.existsSync(from)) continue;
-            if (fs.existsSync(to)) fail('target_changed');
-            created.push(to);
-            fs.cpSync(from, to, { recursive: true, force: false, errorOnExist: true });
-          }
-          const targetFile = path.join(destination, dataFile);
-          if (fs.existsSync(targetFile)) fail('target_changed');
-          created.push(targetFile);
-          writeSnapshot(destination, storage);
-        }
-        const ready = inspect(destination);
-        if (ready.kind !== 'existing') fail('invalid_snapshot');
-        if (action === 'open' && ready.signature !== targetState.signature) fail('target_changed');
-        if (!setRoot(destination, true)) fail('settings_failed');
-        committed = true;
-        revision = crypto.randomUUID();
-        return { ok: true, path: destination, revision, localStorage: ready.localStorage, action, requiresHydration: true };
-      } catch (error) {
-        return { ok: false, error: error.message || 'switch_failed' };
-      } finally {
-        if (!committed) {
-          for (const file of created.reverse()) {
-            try { fs.rmSync(file, { recursive: true, force: true }); } catch (cleanupError) {}
-          }
-        }
-      }
-    },
+    version: 1,
+    file: clip(path.basename(String(fileName || '')), 255),
+    processedAt: Number.isFinite(time.getTime()) ? time.toISOString() : new Date().toISOString(),
+    status,
+    ...(fileError ? { error: fileError } : {}),
+    summary: { imported: imported.length, skipped: skipped.length, warnings: warnings.length },
+    imported,
+    skipped,
+    warnings,
   };
 }
 
@@ -584,7 +583,8 @@ function hoverSpacePollingPolicy({ shortcut, visible, mode } = {}) {
   };
 }
 
-const CONFIGURABLE_FEATURES = new Set(['todo', 'notes', 'links', 'recordings', 'credentials', 'clip']);
+const CONFIGURABLE_FEATURES = new Set(['todo', 'notes', 'news', 'ai-usage', 'links', 'recordings', 'credentials', 'clip']);
+const DEFAULT_PANEL_TABS = new Set(['home', 'todo', 'notes', 'news', 'ai-usage', 'links', 'recordings', 'credentials', 'clip', 'settings']);
 
 function updateFeaturePreference(features, featureId, enabled) {
   if (!CONFIGURABLE_FEATURES.has(featureId) || typeof enabled !== 'boolean') return null;
@@ -592,57 +592,20 @@ function updateFeaturePreference(features, featureId, enabled) {
   return { ...source, [featureId]: enabled, home: true };
 }
 
-// 汽水音乐没有「控制 / 播放」菜单，辅助功能树也读不出窗口与菜单项名，
-// 所以只能往应用内发按键。Space(49) 是播放/暂停切换键，play 与 pause 共用它。
-// 原实现里 play 用的是 Cmd+Right——那和 next 完全同一个键，
-// 所以「点播放」实际发出的是「下一曲」，歌不会开始播，这正是状态错乱的根因。
-function sodaShortcutSpec(action) {
-  if (action === 'play' || action === 'pause') return { keyCode: 49, command: false, dismissOverlays: true };
-  if (action === 'next') return { keyCode: 124, command: true, dismissOverlays: true };
-  if (action === 'previous') return { keyCode: 123, command: true, dismissOverlays: true };
-  return null;
+function normalizeDefaultTabPreference(defaultTab, features) {
+  if (typeof defaultTab !== 'string' || !DEFAULT_PANEL_TABS.has(defaultTab)) return 'home';
+  if (!['home', 'settings'].includes(defaultTab) && features?.[defaultTab] === false) return 'home';
+  return defaultTab;
 }
 
-async function controlSodaMusic(action, dependencies = {}, currentPlaying = false) {
-  if (!['play', 'pause', 'next', 'previous'].includes(action)) {
-    return { ok: false, error: 'invalid_action', running: false, playing: false };
-  }
-
-  const isRunning = dependencies.isRunning;
-  const launch = dependencies.launch;
-  const sendShortcut = dependencies.sendShortcut;
-  const sleep = dependencies.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
-  if (![isRunning, launch, sendShortcut].every((dependency) => typeof dependency === 'function')) {
-    return { ok: false, error: 'music_control_unavailable', running: false, playing: false };
-  }
-
-  let running = await isRunning();
-  let bootstrapped = false;
-  if (!running) {
-    if (action !== 'play') return { ok: false, error: 'no_active_session', running: false, playing: false };
-    const launched = await launch();
-    if (!launched) return { ok: false, error: 'launch_failed', running: false, playing: false };
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      running = await isRunning();
-      if (running) break;
-      await sleep(200);
-    }
-    if (!running) return { ok: false, error: 'launch_failed', running: false, playing: false };
-    bootstrapped = true;
-    await sleep(3000);
-  }
-
-  const shortcutResult = await sendShortcut(action);
-  if (!shortcutResult || shortcutResult.ok !== true) {
-    return {
-      ok: false,
-      error: shortcutResult && shortcutResult.error || 'soda_control_failed',
-      running: true,
-      playing: Boolean(currentPlaying),
-    };
-  }
-  const playing = action === 'pause' ? false : true;
-  return { ok: true, running: true, playing, bootstrapped };
+function updateDefaultTabPreference(settings, defaultTab) {
+  const source = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+  const features = source.features && typeof source.features === 'object' && !Array.isArray(source.features)
+    ? source.features
+    : {};
+  const normalized = normalizeDefaultTabPreference(defaultTab, features);
+  if (normalized !== defaultTab) return null;
+  return { ...source, defaultTab: normalized };
 }
 
 module.exports = {
@@ -668,10 +631,14 @@ module.exports = {
   screenRecordingProbePolicy,
   taskNotificationWindowPolicy,
   reduceClipboardObservation,
+  createForegroundMediaPermissionCoordinator,
   createWorkspacePersistenceGate,
-  createWorkspaceStore,
+  isTodoInboxCandidate,
+  parseTodoInboxBuffer,
+  todoInboxArchiveNames,
+  buildTodoInboxReport,
   hoverSpacePollingPolicy,
   updateFeaturePreference,
-  sodaShortcutSpec,
-  controlSodaMusic,
+  normalizeDefaultTabPreference,
+  updateDefaultTabPreference,
 };

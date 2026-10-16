@@ -19,12 +19,48 @@ function collectLocalStorageSnapshot() {
   const result = {};
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (key && key !== 'notch-workspace-origin-v1') result[key] = localStorage.getItem(key);
+    if (key) result[key] = localStorage.getItem(key);
   }
   return result;
 }
 
-const initialWorkspaceSnapshot = collectLocalStorageSnapshot();
+let workspaceReloadPending = false;
+async function hydratePortableWorkspace() {
+  if (!window.notchAPI?.loadWorkspaceData) return;
+  try {
+    const snapshot = await window.notchAPI.loadWorkspaceData();
+    let imported = false;
+    if (sessionStorage.getItem('notch-workspace-hydrated') !== '1' && snapshot && typeof snapshot === 'object') {
+      Object.entries(snapshot).forEach(([key, value]) => {
+        if (typeof value === 'string' && localStorage.getItem(key) === null) {
+          localStorage.setItem(key, value);
+          imported = true;
+        }
+      });
+      sessionStorage.setItem('notch-workspace-hydrated', '1');
+    }
+    if (imported) {
+      // The current editors were initialized before the asynchronous import.
+      // Their unload/visibility handlers must not overwrite recovered values.
+      workspaceReloadPending = true;
+      location.reload();
+      return;
+    }
+    setInterval(() => window.notchAPI.saveWorkspaceData(collectLocalStorageSnapshot()).catch(() => {}), 2000);
+    // 恢复流程可能整页重载；只有确定不再重载后才接收外部导入。
+    startTodoInbox();
+  } catch (error) {}
+}
+// Do not interrupt parser-loaded workspace scripts with a recovery navigation.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', hydratePortableWorkspace, { once: true });
+} else {
+  hydratePortableWorkspace();
+}
+window.notchAPI?.onWorkspaceChanged?.(() => {
+  sessionStorage.removeItem('notch-workspace-hydrated');
+  window.notchAPI.saveWorkspaceData(collectLocalStorageSnapshot()).finally(() => location.reload());
+});
 
 let statusToastTimer = null;
 let statusToastHideTimer = null;
@@ -129,50 +165,23 @@ function normalizeTodoItems(value) {
     .filter(Boolean);
 }
 
-function saveData(nextData) {
-  if (window.__notchWorkspaceHydrating) return false;
+function saveData(data) {
   try {
-    const serialized = JSON.stringify(nextData);
-    localStorage.setItem(STORAGE_KEY, serialized);
-    lastSavedTodos = serialized;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch (e) {
-    data = JSON.parse(lastSavedTodos);
-    showStatusToast('待办未保存，输入仍保留。请释放存储空间后重试。', { duration: 6000 });
-    return false;
+    // ignore quota errors
   }
   if (window.notchAPI && typeof window.notchAPI.scheduleTodoReminders === 'function') {
     const reminders = PRIORITIES.flatMap((priority) => data[priority] || []);
     window.notchAPI.scheduleTodoReminders(reminders).catch(() => {});
   }
-  document.dispatchEvent(new CustomEvent('notch:todos-changed'));
-  return true;
 }
 
 let data = loadData();
-let lastSavedTodos = JSON.stringify(data);
 let todoCategoryNames = loadTodoCategoryNames();
 const todoSelections = Object.fromEntries(PRIORITIES.map((priority) => [priority, new Set()]));
 const todoSelectionAnchors = Object.fromEntries(PRIORITIES.map((priority) => [priority, null]));
-const TODO_DRAFTS_KEY = 'notch-todo-drafts-v1';
-let savedTodoDrafts = {};
-try { savedTodoDrafts = JSON.parse(localStorage.getItem(TODO_DRAFTS_KEY) || '{}') || {}; } catch {}
-let editingTodo = savedTodoDrafts.editing && data[savedTodoDrafts.editing.priority]?.some((item) => item.id === savedTodoDrafts.editing.id)
-  ? savedTodoDrafts.editing : null;
-
-function persistTodoDrafts(strict = false) {
-  if (window.__notchWorkspaceHydrating) return;
-  const adds = Object.fromEntries(PRIORITIES.map((priority) => {
-    const input = document.querySelector(`.add-row input[data-priority="${priority}"]`);
-    const trigger = document.querySelector(`.todo-deadline-trigger[data-deadline-priority="${priority}"]`);
-    return [priority, { text: input?.value || '', deadline: trigger?.dataset.deadline || '', source: trigger?.dataset.deadlineSource || 'default' }];
-  }));
-  try { localStorage.setItem(TODO_DRAFTS_KEY, JSON.stringify({ editing: editingTodo, adds })); }
-  catch (error) {
-    if (strict) throw error;
-    showStatusToast('输入草稿尚未保存，请释放存储空间后重试', { duration: 5000 });
-  }
-}
-window.addEventListener('beforeunload', () => persistTodoDrafts());
+let editingTodo = null;
 
 function loadTodoCategoryNames() {
   try {
@@ -191,7 +200,6 @@ function persistTodoCategoryNames() {
   } catch (error) {
     // LocalStorage 不可用时仍保留当前会话中的分类名。
   }
-  document.dispatchEvent(new CustomEvent('notch:todos-changed'));
 }
 
 function applyTodoCategoryNames() {
@@ -211,7 +219,7 @@ if (window.notchAPI && typeof window.notchAPI.scheduleTodoReminders === 'functio
 
 if (window.notchAPI && typeof window.notchAPI.onTodoReminder === 'function') {
   window.notchAPI.onTodoReminder((payload) => {
-    if (window.__notchWorkspaceHydrating || !payload || !payload.id) return;
+    if (!payload || !payload.id) return;
     let changed = false;
     PRIORITIES.forEach((priority) => {
       const item = (data[priority] || []).find((todo) => (
@@ -242,12 +250,6 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-function formatTodoDeadline(value) {
-  return Number.isFinite(Date.parse(String(value || '')))
-    ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-    : '无截止时间';
-}
-
 function todoItemHtml(priority, item) {
   const doneClass = item.done ? ' done' : '';
   const selectedClass = todoSelections[priority]?.has(item.id) ? ' multi-selected' : '';
@@ -262,19 +264,20 @@ function todoItemHtml(priority, item) {
     }).format(new Date(item.deadline))
     : '';
   const toggleLabel = item.done ? `恢复未完成：${safeText}` : `标记完成：${safeText}`;
-  const battery = window.NotchDomain.todoDeadlineStatus(item, Date.now());
+  const battery = window.NotchDomain.todoTimeBattery(item, Date.now());
+  // 逾期项整条填满红色并只显示一个白色感叹号：剩余 0% 是「快到了」，
+  // 逾期是「已经欠账」，两者不能长得一样。
   const batteryHtml = battery
-    ? `<span class="todo-time-status" data-tone="${battery.tone}" title="${escapeHtml(deadline)}">${battery.label}</span>`
+    ? `<span class="todo-battery" data-tone="${battery.tone}"${battery.overdue ? ' data-overdue="true" role="img"' : ''} title="${battery.label}" aria-label="${battery.label}"><i style="--battery:${battery.overdue ? 100 : battery.percent}%"></i><b>${battery.overdue ? '!' : `${battery.percent}%`}</b></span>`
     : '';
   const isEditing = editingTodo?.priority === priority && editingTodo?.id === item.id;
   const contentHtml = isEditing
-    ? `<div class="todo-inline-editor"><input class="todo-inline-name" value="${escapeHtml(editingTodo.text ?? item.text)}" maxlength="80" aria-label="修改待办名称" /><button class="todo-inline-deadline" type="button" data-action="edit-deadline">${formatTodoDeadline(editingTodo.deadline ?? item.deadline)}</button><button class="todo-inline-save" type="button" data-action="save-edit" aria-label="保存修改">✓</button></div>`
+    ? `<div class="todo-inline-editor"><input class="todo-inline-name" value="${safeText}" maxlength="80" aria-label="修改待办名称" />${batteryHtml}<button class="todo-inline-deadline" type="button" data-action="edit-deadline">${deadline || '日期'}</button><button class="todo-inline-save" type="button" data-action="save-edit" aria-label="保存修改">✓</button></div>`
     : `<button class="todo-copy" type="button" data-action="edit" title="${safeText}" aria-label="修改：${safeText}"><span class="todo-text">${safeText}</span>${batteryHtml}${deadline ? `<time class="todo-ddl" datetime="${escapeHtml(item.deadline)}">${escapeHtml(deadline)}</time>` : ''}</button>`;
   return `
     <li class="todo-item${doneClass}${selectedClass}" data-id="${safeId}" data-priority="${priority}">
       <button class="checkbox" type="button" data-action="toggle" aria-label="${toggleLabel}" aria-pressed="${item.done}">${checkSvg()}</button>
       ${contentHtml}
-      ${!item.done && !isEditing ? `<button class="todo-focus-action" type="button" data-action="focus-task" aria-label="设为当前任务：${safeText}" title="设为当前任务">◎</button>` : ''}
       <button class="delete" type="button" data-action="delete" aria-label="删除：${safeText}">×</button>
     </li>
   `;
@@ -348,16 +351,7 @@ function renderAll() {
   });
 }
 
-function refreshTodoTimeLabels() {
-  document.querySelectorAll('.todo-item').forEach((row) => {
-    const item = data[row.dataset.priority]?.find((todo) => todo.id === row.dataset.id);
-    const label = row.querySelector('.todo-time-status');
-    if (!label || !item) return;
-    const state = window.NotchDomain.todoDeadlineStatus(item);
-    if (state) { label.textContent = state.label; label.dataset.tone = state.tone; }
-  });
-}
-setInterval(refreshTodoTimeLabels, 60_000);
+setInterval(() => PRIORITIES.forEach(renderList), 60_000);
 
 // 渲染重建 innerHTML 后，给指定条目挂一次性动画类；动画结束即卸载，不污染后续渲染
 function flashItemClass(priority, id, cls) {
@@ -383,7 +377,7 @@ function addTodo(priority, text, deadline) {
   if (!item) return false;
   const previousPositions = captureTodoPositions(priority);
   data[priority].push(item);
-  if (!saveData(data)) return false;
+  saveData(data);
   renderList(priority, { previousPositions });
   updateCount(priority);
   flashItemClass(priority, item.id, 'enter');
@@ -406,8 +400,7 @@ function editTodo(priority, id, text, deadline) {
   if (!updated) return false;
   const previousPositions = captureTodoPositions(priority);
   data[priority][index] = updated;
-  if (!saveData(data)) return false;
-  editingTodo = null;
+  saveData(data);
   renderList(priority, { previousPositions, focusId: id, focusAction: 'edit' });
   return true;
 }
@@ -420,7 +413,7 @@ function toggleTodo(priority, id) {
   const restoreFocus = document.activeElement?.closest('.todo-item')?.dataset.id === id;
   list[idx].done = !list[idx].done;
   const nowDone = list[idx].done;
-  if (!saveData(data)) { renderList(priority); return false; }
+  saveData(data);
   renderList(priority, {
     previousPositions,
     focusId: restoreFocus ? id : '',
@@ -434,7 +427,6 @@ function deleteTodo(priority, id) {
   const list = data[priority];
   const index = list.findIndex((t) => t.id === id);
   if (index === -1) return;
-  const taskMapMetadata = window.NotchTaskMap?.getMetadata(id);
   const [removed] = list.splice(index, 1);
   const itemEl = document.querySelector(
     `.todo-item[data-priority="${priority}"][data-id="${CSS.escape(id)}"]`
@@ -442,7 +434,7 @@ function deleteTodo(priority, id) {
   const shouldRestoreFocus = !!(itemEl && itemEl.contains(document.activeElement));
   const nearbyItem = itemEl && (itemEl.nextElementSibling || itemEl.previousElementSibling);
   if (itemEl) itemEl.remove();
-  if (!saveData(data)) { renderList(priority); updateCount(priority); return; }
+  saveData(data);
   updateCount(priority);
   if (shouldRestoreFocus) {
     const nextFocus =
@@ -455,11 +447,9 @@ function deleteTodo(priority, id) {
     actionLabel: '撤销',
     duration: 5000,
     onAction: () => {
-      const currentList = data[priority];
-      if (currentList.some((item) => item.id === removed.id)) return;
-      currentList.splice(Math.min(index, currentList.length), 0, removed);
-      window.NotchTaskMap?.restoreMetadata(id, taskMapMetadata);
-      if (!saveData(data)) return;
+      if (list.some((item) => item.id === removed.id)) return;
+      list.splice(Math.min(index, list.length), 0, removed);
+      saveData(data);
       renderList(priority);
       updateCount(priority);
       const restored = document.querySelector(
@@ -475,7 +465,6 @@ let isExpanded = false;
 let modeBusy = false;
 let pendingMode = null;
 let restoreNotchFocusAfterCollapse = false;
-let resumePanelFocus = null;
 // 从折叠态展开的瞬间置 true，岛体落定后自动清除；
 // setActiveTab 读取此标志决定是否延后重活，已展开态切 Tab 不受影响。
 let _justExpanded = false;
@@ -544,7 +533,7 @@ function syncPanelAccessibility(expanded) {
   }
   if (!notch) return;
   notch.setAttribute('aria-expanded', String(expanded));
-  notch.setAttribute('aria-label', expanded ? '收起 醒目' : '展开 醒目');
+  notch.setAttribute('aria-label', expanded ? '收起醒目-个人效率工作台' : '展开醒目-个人效率工作台');
   if (expanded && document.activeElement === notch) {
     const activeTabButton = document.querySelector(`.tab[data-tab="${activeTab}"]`);
     if (activeTabButton) activeTabButton.focus({ preventScroll: true });
@@ -565,8 +554,14 @@ async function setMode(expanded) {
   isExpanded = expanded;
   try {
     if (expanded) {
-      // Keep the current page and drafts during an interruption.
-      applyTabDom(activeTab);
+      // 每次召回使用设置中的默认页，不沿用上次收起时的停留页。
+      _justExpanded = true;
+      setTimeout(() => {
+        _justExpanded = false;
+      }, OPENING_SETTLE_MS);
+      const openingTab = window.NotchDomain.resolveDefaultPanelTab(defaultOpenTab, TABS);
+      if (activeTab !== openingTab) await setActiveTab(openingTab);
+      else applyTabDom(openingTab);
       syncPanelAccessibility(true);
       app.classList.remove('collapsed', 'closing');
       app.classList.add('opening');
@@ -581,36 +576,15 @@ async function setMode(expanded) {
       await nextAnimationFrame();
       app.classList.remove('opening');
       app.classList.add('expanded');
-      if (resumePanelFocus?.element?.isConnected && !resumePanelFocus.element.closest('[inert], [hidden]')) {
-        const { element, start, end } = resumePanelFocus;
-        element.focus({ preventScroll: true });
-        if (typeof element.setSelectionRange === 'function' && start !== null) {
-          try { element.setSelectionRange(start, end); } catch {}
-        }
-      }
       // 展开后面板从隐藏变为可见，tab 尺寸此时才可量，校准激活胶囊位置
       requestAnimationFrame(() => requestAnimationFrame(positionIndicator));
-      // 标记"刚从折叠展开"——setActiveTab 会把图片等重活延后到动画落定后再跑。
-      // 360ms 覆盖岛体 340ms 形变并留一帧余量，过后让切 Tab 恢复即时加载。
-      _justExpanded = true;
-      setTimeout(() => {
-        _justExpanded = false;
-      }, OPENING_SETTLE_MS);
       setTimeout(() => {
         if (!isExpanded) return;
         if (activeTab === 'clip') renderClipList();
       }, HEAVY_LOAD_AFTER_OPEN_MS);
     } else {
-      const focused = document.activeElement;
-      resumePanelFocus = focused && panel.contains(focused)
-        ? { element: focused, start: focused.selectionStart ?? null, end: focused.selectionEnd ?? null } : null;
-      window.NotchQuickCapture?.close();
-      window.NotchFocus?.close();
-      window.NotchTaskMap?.close();
       const motion = waitForPanelMotion();
       syncPanelAccessibility(false);
-      // 隐私优先：不要把摄像头释放放在 rAF 之后，隐藏窗口可能暂停动画帧。
-      stopMirror();
       await ipcBeginCollapse();
       app.classList.add('closing');
       await nextAnimationFrame();
@@ -653,7 +627,7 @@ notch.addEventListener('keydown', (e) => {
 document.addEventListener('keydown', (event) => {
   const target = event.target instanceof Element ? event.target : null;
   const editable = Boolean(target && target.closest(
-    'input, textarea, select, [contenteditable]:not([contenteditable="false"]), audio, video, dialog button, #home-focus-strip button, .tm-widget button, .tm-dialog button, [data-app-quit], [data-quick-capture]'
+    'input, textarea, select, [contenteditable]:not([contenteditable="false"]), audio, video'
   ));
   if (!window.NotchDomain.shouldTogglePanelForSpace({
     key: event.key,
@@ -681,9 +655,10 @@ panel.addEventListener('click', (e) => {
 // Escape 不会原生到达页面（被浏览器层吞掉），由主进程 before-input-event 转发
 if (window.notchAPI && typeof window.notchAPI.onEscape === 'function') {
   window.notchAPI.onEscape(() => {
-    if (window.NotchQuickCapture?.close()) return;
-    if (window.NotchFocus?.close()) return;
-    if (window.NotchTaskMap?.close()) return;
+    if (window.NotchAISettings?.isOpen()) {
+      window.NotchAISettings.close();
+      return;
+    }
     const el = document.activeElement;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
       el.blur();
@@ -748,17 +723,55 @@ if (window.notchAPI && typeof window.notchAPI.onMetricsChanged === 'function') {
 
 // ============ Tab 切换 ============
 const TAB_KEY = 'notch-active-tab';
-const ALL_TABS = ['home', 'todo', 'notes', 'links', 'recordings', 'credentials', 'clip', 'settings'];
-let TABS = ALL_TABS.filter((name) => name !== 'clip');
+const ALL_TABS = ['home', 'news', 'ai-usage', 'todo', 'notes', 'links', 'recordings', 'credentials', 'clip', 'settings'];
+let TABS = ALL_TABS.filter((name) => name !== 'clip' && name !== 'ai-usage');
 let tabButtons = Array.from(document.querySelectorAll('.tab:not([hidden])'));
 const tabPanels = Array.from(document.querySelectorAll('.tab-panel'));
 const tabIndicator = document.getElementById('tab-indicator');
 const collapseBtn = document.getElementById('collapse-btn');
 
 let activeTab = 'home';
+let defaultOpenTab = 'home';
+
+// Capture the former homepage preference before the six-widget layout filters it.
+// A pending marker survives failed IPC and a workspace hydration reload.
+const AI_USAGE_MIGRATION_KEY = 'notch-ai-usage-workspace-migration-v1';
+let aiUsageMigrationPending = false;
+let aiUsageMigrationAttempted = false;
+let featureSettingsGeneration = 0;
+try {
+  const migration = localStorage.getItem(AI_USAGE_MIGRATION_KEY);
+  if (migration === 'pending') aiUsageMigrationPending = true;
+  else if (migration !== 'complete' && localStorage.getItem('notch-home-modules-version') === '2') {
+    const oldHidden = JSON.parse(localStorage.getItem('notch-home-hidden-modules-v1') || 'null');
+    if (Array.isArray(oldHidden)) {
+      aiUsageMigrationPending = !oldHidden.includes('ai-usage');
+      localStorage.setItem(AI_USAGE_MIGRATION_KEY, aiUsageMigrationPending ? 'pending' : 'complete');
+    }
+  }
+} catch (error) {}
+
+function migrateAIUsageFeature(settings) {
+  if (!aiUsageMigrationPending || aiUsageMigrationAttempted) return;
+  const complete = () => {
+    aiUsageMigrationPending = false;
+    try { localStorage.setItem(AI_USAGE_MIGRATION_KEY, 'complete'); } catch (error) {}
+  };
+  if (settings?.features?.['ai-usage'] === true) { complete(); return; }
+  if (typeof window.notchAPI?.setFeature !== 'function') return;
+  aiUsageMigrationAttempted = true;
+  const generation = featureSettingsGeneration;
+  window.notchAPI.setFeature('ai-usage', true).then((result) => {
+    if (!result?.ok) return;
+    complete();
+    // A newer settings event (including a manual switch-off) is authoritative.
+    if (result.settings && generation === featureSettingsGeneration) applyFeatureSettings(result.settings);
+  }).catch(() => {});
+}
 
 function applyFeatureSettings(settings) {
-  const features = { ...(settings && settings.features || {}), home: true, settings: true };
+  featureSettingsGeneration += 1;
+  const features = { ...(settings && settings.features || {}), 'ai-usage': settings?.features?.['ai-usage'] === true, home: true, settings: true };
   document.querySelectorAll('.tab[data-tab]').forEach((button) => {
     const enabled = button.dataset.tab === 'home'
       || button.dataset.tab === 'settings'
@@ -767,6 +780,7 @@ function applyFeatureSettings(settings) {
     button.setAttribute('aria-hidden', String(!enabled));
   });
   TABS = window.NotchDomain.visiblePanelTabs(ALL_TABS, features);
+  defaultOpenTab = window.NotchDomain.resolveDefaultPanelTab(settings?.defaultTab, TABS);
   tabButtons = Array.from(document.querySelectorAll('.tab:not([hidden])'));
   tabButtons.forEach((button) => button.classList.remove('tab-split-start'));
   document.getElementById('tabs')?.classList.toggle('is-split', tabButtons.length > 4);
@@ -774,7 +788,9 @@ function applyFeatureSettings(settings) {
     tabButtons[Math.ceil(tabButtons.length / 2)]?.classList.add('tab-split-start');
   }
   if (!TABS.includes(activeTab)) setActiveTab('home');
+  document.dispatchEvent(new CustomEvent('notch:featureschange', { detail: { features } }));
   requestAnimationFrame(positionIndicator);
+  migrateAIUsageFeature(settings);
 }
 
 if (window.notchAPI?.getAppSettings) {
@@ -790,7 +806,8 @@ function positionIndicator() {
 }
 
 function applyTabDom(name) {
-  tabButtons.forEach((b) => {
+  // Clear selection on hidden tabs too when a feature is turned off.
+  document.querySelectorAll('.tab[data-tab]').forEach((b) => {
     const selected = b.dataset.tab === name;
     b.classList.toggle('active', selected);
     b.setAttribute('aria-selected', String(selected));
@@ -838,7 +855,6 @@ async function setActiveTab(name) {
   }
   tabBusy = true;
   activeTab = name;
-  if (name !== 'home') stopMirror();
   try {
     // 图片预加载等重活的调度策略：
     //   - 已展开态切 Tab：_justExpanded=false → 立即执行，保持即时响应
@@ -1071,8 +1087,11 @@ function renderTodoCalendar() {
 
 function closeTodoEditor() {
   if (todoEditorBackdrop) todoEditorBackdrop.hidden = true;
+  if (todoEditorContext?.mode === 'edit') {
+    const { priority } = todoEditorContext;
+    renderList(priority);
+  }
   todoEditorContext = null;
-  persistTodoDrafts();
 }
 
 function selectedTodoDeadline() {
@@ -1095,10 +1114,10 @@ function applyTodoEditorSelection(markManual = true) {
   if (todoEditorError) todoEditorError.textContent = '';
   const { priority, id, mode } = todoEditorContext;
   if (mode === 'edit') {
-    if (!editingTodo || editingTodo.id !== id) return false;
-    editingTodo.deadline = deadline;
-    const button = document.querySelector(`.todo-item[data-id="${CSS.escape(id)}"] .todo-inline-deadline`);
-    if (button) button.textContent = formatTodoDeadline(deadline);
+    const todo = (data[priority] || []).find((item) => item.id === id);
+    if (!todo) return false;
+    todo.deadline = deadline;
+    saveData(data);
   } else {
     const trigger = document.querySelector(`.todo-deadline-trigger[data-deadline-priority="${priority}"]`);
     if (!trigger) return false;
@@ -1117,8 +1136,8 @@ function openTodoEditor(priority, item = null, anchor = null) {
   const now = new Date();
   const addInput = document.querySelector(`.add-row input[data-priority="${priority}"]`);
   const trigger = document.querySelector(`.todo-deadline-trigger[data-deadline-priority="${priority}"]`);
-  const draftDeadline = item ? (editingTodo?.id === item.id ? editingTodo.deadline : item.deadline) : trigger?.dataset.deadline;
-  const candidate = draftDeadline ? new Date(draftDeadline) : null;
+  if (!item) applyDefaultTodoDeadline(trigger, now);
+  const candidate = item && item.deadline ? new Date(item.deadline) : trigger?.dataset.deadline ? new Date(trigger.dataset.deadline) : null;
   const selectedDate = candidate && Number.isFinite(candidate.getTime())
     ? candidate
     : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 30, 0, 0);
@@ -1143,26 +1162,8 @@ function openTodoEditor(priority, item = null, anchor = null) {
     todoEditorBackdrop.style.right = '12px';
     todoEditorBackdrop.style.bottom = '58px';
   }
+  applyTodoEditorSelection(false);
 }
-
-document.getElementById('todo-no-deadline')?.addEventListener('click', () => {
-  if (!todoEditorContext) return;
-  const { priority, id, mode } = todoEditorContext;
-  if (mode === 'edit' && editingTodo?.id === id) {
-    editingTodo.deadline = '';
-    const button = document.querySelector(`.todo-item[data-id="${CSS.escape(id)}"] .todo-inline-deadline`);
-    if (button) button.textContent = '无截止时间';
-  } else {
-    const trigger = document.querySelector(`.todo-deadline-trigger[data-deadline-priority="${priority}"]`);
-    if (trigger) {
-      trigger.dataset.deadline = '';
-      trigger.dataset.deadlineSource = 'none';
-      trigger.querySelector('span').textContent = '无截止时间';
-      trigger.classList.remove('invalid');
-    }
-  }
-  closeTodoEditor();
-});
 
 todoCalendarGrid?.addEventListener('click', (event) => {
   const button = event.target.closest('[data-day]');
@@ -1196,9 +1197,10 @@ document.addEventListener('pointerdown', (event) => {
 }, true);
 
 function applyDefaultTodoDeadline(trigger, now = new Date()) {
-  if (!trigger || ['manual', 'none'].includes(trigger.dataset.deadlineSource)) return;
+  if (!trigger || (trigger.dataset.deadline && trigger.dataset.deadlineSource !== 'default')) return;
   const deadline = window.NotchDomain.defaultTodoDeadline(now);
   if (!deadline) return;
+  if (trigger.dataset.deadline === deadline && trigger.dataset.deadlineSource === 'default') return;
   trigger.dataset.deadline = deadline;
   trigger.dataset.deadlineSource = 'default';
   trigger.querySelector('span').textContent = new Intl.DateTimeFormat('zh-CN', {
@@ -1207,9 +1209,16 @@ function applyDefaultTodoDeadline(trigger, now = new Date()) {
   trigger.classList.add('selected');
 }
 
+function resetTodoDraftDeadline(trigger, now = new Date()) {
+  if (!trigger) return;
+  delete trigger.dataset.deadline;
+  delete trigger.dataset.deadlineSource;
+  applyDefaultTodoDeadline(trigger, now);
+}
+
 function refreshDefaultTodoDeadlines(now = new Date()) {
   document.querySelectorAll('.todo-deadline-trigger[data-deadline-priority]').forEach((trigger) => {
-    if (['manual', 'none'].includes(trigger.dataset.deadlineSource)) return;
+    if (trigger.dataset.deadlineSource === 'manual') return;
     applyDefaultTodoDeadline(trigger, now);
   });
 }
@@ -1219,37 +1228,27 @@ PRIORITIES.forEach((priority) => {
   const deadlineInput = document.querySelector(`.todo-deadline-trigger[data-deadline-priority="${priority}"]`);
   if (!input) return;
   applyDefaultTodoDeadline(deadlineInput);
-  const draft = savedTodoDrafts.adds?.[priority];
-  if (draft) {
-    input.value = String(draft.text || '');
-    if (['manual', 'none'].includes(draft.source)) {
-      deadlineInput.dataset.deadline = draft.deadline || '';
-      deadlineInput.dataset.deadlineSource = draft.source;
-      deadlineInput.querySelector('span').textContent = formatTodoDeadline(draft.deadline);
-    }
-  }
-  input.addEventListener('input', () => persistTodoDrafts());
 
   const submitTodo = () => {
     const value = input.value;
     if (!value.trim()) return;
-    if (!deadlineInput || (!deadlineInput.dataset.deadline && deadlineInput.dataset.deadlineSource !== 'none')) {
+    // Sleep or midnight may have passed since the form was rendered.
+    applyDefaultTodoDeadline(deadlineInput);
+    if (!deadlineInput || !deadlineInput.dataset.deadline) {
       deadlineInput?.classList.add('invalid');
       openTodoEditor(priority);
       return;
     }
     if (!addTodo(priority, value, deadlineInput.dataset.deadline)) {
       deadlineInput.classList.add('invalid');
-      showStatusToast('待办未保存，请检查日期或本机存储后重试', { duration: 5000 });
+      showStatusToast('截止时间格式不正确');
       return;
     }
     input.value = '';
-    delete deadlineInput.dataset.deadline;
-    delete deadlineInput.dataset.deadlineSource;
-    applyDefaultTodoDeadline(deadlineInput);
+    if (todoEditorContext?.mode === 'add' && todoEditorContext.priority === priority) closeTodoEditor();
+    resetTodoDraftDeadline(deadlineInput);
     deadlineInput.classList.remove('invalid');
     input.focus({ preventScroll: true });
-    persistTodoDrafts();
   };
 
   input.addEventListener('keydown', (e) => {
@@ -1258,6 +1257,7 @@ PRIORITIES.forEach((priority) => {
     if (e.repeat) return;
     submitTodo();
   });
+  input.addEventListener('focus', () => applyDefaultTodoDeadline(deadlineInput));
   deadlineInput?.addEventListener('click', () => openTodoEditor(priority));
 });
 
@@ -1290,7 +1290,7 @@ PRIORITIES.forEach((priority) => {
     } else if (action === 'edit') {
       const todo = (data[priority] || []).find((item) => item.id === id);
       if (todo) {
-        editingTodo = { priority, id, text: todo.text, deadline: todo.deadline || '' };
+        editingTodo = { priority, id };
         renderList(priority);
         requestAnimationFrame(() => document.querySelector(`.todo-item[data-id="${CSS.escape(id)}"] .todo-inline-name`)?.focus({ preventScroll: true }));
       }
@@ -1300,28 +1300,18 @@ PRIORITIES.forEach((priority) => {
     } else if (action === 'save-edit') {
       const todo = (data[priority] || []).find((candidate) => candidate.id === id);
       const name = item.querySelector('.todo-inline-name')?.value.trim() || '';
-      if (!todo || !name) return;
-      editTodo(priority, id, name, editingTodo?.id === id ? editingTodo.deadline : todo.deadline);
-      persistTodoDrafts();
-    } else if (action === 'focus-task') {
-      window.NotchFocus?.selectTask(id);
-      void setActiveTab('home');
+      if (!todo || !name || !todo.deadline) return;
+      editingTodo = null;
+      editTodo(priority, id, name, todo.deadline);
     } else if (action === 'delete') {
       deleteTodo(priority, id);
     }
-  });
-  list.addEventListener('input', (event) => {
-    if (!event.target.matches('.todo-inline-name')) return;
-    const id = event.target.closest('.todo-item')?.dataset.id;
-    if (editingTodo?.id === id) editingTodo.text = event.target.value;
-    persistTodoDrafts();
   });
   list.addEventListener('keydown', (event) => {
     const item = event.target.closest('.todo-item');
     if (!item || !event.target.matches('.todo-inline-name')) return;
     if (event.key === 'Escape') {
       editingTodo = null;
-      persistTodoDrafts();
       renderList(priority);
     } else if (event.key === 'Enter' && !event.isComposing) {
       event.preventDefault();
@@ -1335,60 +1325,140 @@ document.querySelectorAll('.todo-bulk-delete[data-bulk-priority]').forEach((butt
     const priority = button.dataset.bulkPriority;
     const selected = todoSelections[priority];
     if (!selected || !selected.size) return;
-    const removed = data[priority].map((item, index) => ({ item: { ...item }, index, metadata: window.NotchTaskMap?.getMetadata(item.id) }))
-      .filter(({ item }) => selected.has(item.id));
     data[priority] = (data[priority] || []).filter((item) => !selected.has(item.id));
-    if (!saveData(data)) return;
     selected.clear();
     todoSelectionAnchors[priority] = null;
+    saveData(data);
     renderList(priority);
     updateCount(priority);
-    showStatusToast(`已删除 ${removed.length} 项待办`, {
-      actionLabel: '撤销', duration: 8000,
-      onAction: () => {
-        removed.forEach(({ item, index, metadata }) => {
-          if (!data[priority].some((todo) => todo.id === item.id)) data[priority].splice(Math.min(index, data[priority].length), 0, item);
-          window.NotchTaskMap?.restoreMetadata(item.id, metadata);
-        });
-        saveData(data); renderList(priority); updateCount(priority);
-      },
-    });
+    showStatusToast('已删除所选待办');
   });
 });
 
-// ============ 首页 · 时钟·日期 ============
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-const clockDateEl = document.getElementById('clock-date');
-const clockHEl = document.getElementById('clock-h');
-const clockMEl = document.getElementById('clock-m');
-const clockSsEl = document.getElementById('clock-ss');
+// ============ 待办 · 常驻跨天刷新 ============
+// Draft dates must not depend on a home clock widget being present or visible.
 let todoDefaultRefreshKey = '';
 
-function pad2(n) {
-  return n < 10 ? '0' + n : String(n);
-}
-
-function tickClock() {
-  if (!clockHEl || !clockMEl) return;
+function tickTodoDefaultDeadlines() {
   const now = new Date();
-  const h = pad2(now.getHours());
-  const m = pad2(now.getMinutes());
-  if (clockHEl.textContent !== h) clockHEl.textContent = h;
-  if (clockMEl.textContent !== m) clockMEl.textContent = m;
-  if (clockSsEl) clockSsEl.textContent = pad2(now.getSeconds());
-  if (clockDateEl) {
-    const dateStr = `${WEEKDAYS[now.getDay()]} · ${now.getMonth() + 1}/${now.getDate()}`;
-    if (clockDateEl.textContent !== dateStr) clockDateEl.textContent = dateStr;
-  }
-  const refreshKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours() > 23 || (now.getHours() === 23 && now.getMinutes() >= 30)}`;
+  const refreshKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getTimezoneOffset()}`;
   if (refreshKey !== todoDefaultRefreshKey) {
     todoDefaultRefreshKey = refreshKey;
     refreshDefaultTodoDeadlines(now);
   }
 }
 
-tickClock();
-setInterval(tickClock, 1000);
+tickTodoDefaultDeadlines();
+setInterval(tickTodoDefaultDeadlines, 1000);
+window.addEventListener('focus', () => refreshDefaultTodoDeadlines());
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshDefaultTodoDeadlines();
+});
+document.addEventListener('notch:modechange', (event) => {
+  if (event.detail?.expanded) refreshDefaultTodoDeadlines();
+});
+document.addEventListener('notch:tabchange', (event) => {
+  if (event.detail?.tab === 'todo') refreshDefaultTodoDeadlines();
+});
+
+// ============ 待办 · 外部导入收件箱 ============
+// 主进程读取 todo-inbox/*.json 后投递到这里；合并只追加，不改动已有待办。
+
+// 导入可能在用户行内改名时到达：重绘列表前后保留输入中的草稿与光标。
+function renderListKeepingDraft(priority, options) {
+  const input = editingTodo?.priority === priority
+    ? document.querySelector(`.todo-item[data-id="${CSS.escape(editingTodo.id)}"] .todo-inline-name`)
+    : null;
+  const draft = input && {
+    value: input.value,
+    focused: document.activeElement === input,
+    start: input.selectionStart,
+    end: input.selectionEnd,
+  };
+  renderList(priority, options);
+  if (!draft) return;
+  const next = document.querySelector(`.todo-item[data-id="${CSS.escape(editingTodo.id)}"] .todo-inline-name`);
+  if (!next) return;
+  next.value = draft.value;
+  if (draft.focused) {
+    next.focus({ preventScroll: true });
+    next.setSelectionRange(draft.start, draft.end);
+  }
+}
+
+function applyTodoInboxImport(message) {
+  const result = window.NotchDomain.mergeTodoImport(data, message.payload, {
+    categories: PRIORITIES,
+    categoryNames: todoCategoryNames,
+    now: Date.now(),
+    sourceId: message.sourceId,
+  });
+  const report = {
+    error: result.error || '',
+    imported: result.imported.map(({ index, category, todo }) => ({
+      index,
+      id: todo.id,
+      category,
+      categoryName: todoCategoryNames[category],
+      text: todo.text,
+      deadline: todo.deadline,
+    })),
+    skipped: result.skipped,
+    warnings: result.warnings,
+  };
+  if (!result.imported.length) return report;
+  const touched = [...new Set(result.imported.map(({ category }) => category))];
+  const previousPositions = Object.fromEntries(touched.map((priority) => [priority, captureTodoPositions(priority)]));
+  // 追加进现有数组而不是整体替换：删除「撤销」的闭包还持有这些数组引用。
+  result.imported.forEach(({ category, todo }) => data[category].push(todo));
+  saveData(data);
+  if (localStorage.getItem(STORAGE_KEY) !== JSON.stringify(data)) {
+    // 本地存储写入失败（如配额已满）：回滚内存，让主进程稍后重试，源文件保留。
+    const addedIds = new Set(result.imported.map(({ todo }) => todo.id));
+    touched.forEach((priority) => {
+      const list = data[priority];
+      for (let index = list.length - 1; index >= 0; index -= 1) {
+        if (addedIds.has(list[index].id)) list.splice(index, 1);
+      }
+    });
+    saveData(data);
+    return { retry: true };
+  }
+  touched.forEach((priority) => {
+    renderListKeepingDraft(priority, { previousPositions: previousPositions[priority] });
+    updateCount(priority);
+  });
+  result.imported.forEach(({ category, todo }) => flashItemClass(category, todo.id, 'enter'));
+  // 不顶掉正在等待「撤销」的提示。
+  if (!statusToastActionHandler) {
+    const skippedText = result.skipped.length ? `，跳过 ${result.skipped.length} 条` : '';
+    showStatusToast(`已导入 ${result.imported.length} 条待办${skippedText}`);
+  }
+  return report;
+}
+
+function startTodoInbox() {
+  if (!window.notchAPI?.onTodoInboxImport || !window.notchAPI?.todoInboxReady) return;
+  window.notchAPI.onTodoInboxImport(async (message) => {
+    if (!message || typeof message.token !== 'string') return;
+    let result;
+    try {
+      result = applyTodoInboxImport(message);
+    } catch (error) {
+      // 意外异常时不归档；稍后重试时稳定 id 会挡住已写入的条目。
+      result = { retry: true };
+    }
+    if (result.imported?.length) {
+      await window.notchAPI.saveWorkspaceData(collectLocalStorageSnapshot()).catch(() => {});
+    }
+    window.notchAPI.completeTodoInbox(message.token, result).catch(() => {});
+  });
+  window.notchAPI.todoInboxReady().catch(() => {});
+}
+
+function pad2(n) {
+  return n < 10 ? '0' + n : String(n);
+}
 
 // ============ 首页 · 番茄钟 ============
 const pomodoroToggle = document.getElementById('pomodoro-toggle');
@@ -1420,8 +1490,6 @@ let pomodoroRemaining = pomodoroConfiguredSeconds;
 let pomodoroRunning = false;
 let pomodoroStarted = false;
 let pomodoroTimer = null;
-let pomodoroTaskId = '';
-let pomodoroEndsAt = 0;
 
 function secondsToParts(seconds) {
   const safe = Math.max(0, Math.floor(seconds));
@@ -1458,7 +1526,6 @@ function renderPomodoro() {
   }
   if (pomodoroReset) pomodoroReset.hidden = !pomodoroStarted;
   homePomodoro?.setAttribute('data-state', pomodoroRunning ? 'running' : (pomodoroStarted ? 'paused' : 'idle'));
-  document.dispatchEvent(new CustomEvent('notch:pomodoro-changed', { detail: { taskId: pomodoroTaskId, running: pomodoroRunning, started: pomodoroStarted, remainingSeconds: pomodoroRemaining } }));
 }
 
 function commitPomodoroInputs() {
@@ -1497,7 +1564,6 @@ pomodoroInputs.forEach((input) => {
 });
 
 pomodoroToggle?.addEventListener('click', () => {
-  if (pomodoroRunning) pomodoroRemaining = Math.max(0, Math.ceil((pomodoroEndsAt - Date.now()) / 1000));
   if (!pomodoroStarted) {
     commitPomodoroInputs();
     if (pomodoroConfiguredSeconds <= 0) {
@@ -1511,9 +1577,8 @@ pomodoroToggle?.addEventListener('click', () => {
   clearInterval(pomodoroTimer);
   pomodoroTimer = null;
   if (pomodoroRunning) {
-    pomodoroEndsAt = Date.now() + pomodoroRemaining * 1000;
     pomodoroTimer = setInterval(() => {
-      pomodoroRemaining = Math.max(0, Math.ceil((pomodoroEndsAt - Date.now()) / 1000));
+      pomodoroRemaining -= 1;
       if (pomodoroRemaining <= 0) {
         const completedMinutes = Math.max(1, Math.round(pomodoroConfiguredSeconds / 60));
         pomodoroRemaining = pomodoroConfiguredSeconds;
@@ -1521,9 +1586,7 @@ pomodoroToggle?.addEventListener('click', () => {
         pomodoroStarted = false;
         clearInterval(pomodoroTimer);
         pomodoroTimer = null;
-        const task = PRIORITIES.flatMap((id) => data[id]).find((item) => item.id === pomodoroTaskId);
-        showStatusToast(`${task ? `“${task.text}” · ` : ''}${completedMinutes} 分钟专注完成`, { duration: 5000 });
-        document.dispatchEvent(new CustomEvent('notch:pomodoro-completed', { detail: { taskId: pomodoroTaskId } }));
+        showStatusToast(`${completedMinutes} 分钟专注完成`);
         window.notchAPI?.notifyPomodoro?.(completedMinutes).catch(() => {});
       }
       renderPomodoro();
@@ -1538,30 +1601,7 @@ pomodoroReset?.addEventListener('click', () => {
   pomodoroRunning = false;
   pomodoroStarted = false;
   pomodoroRemaining = pomodoroConfiguredSeconds;
-  pomodoroTaskId = '';
   renderPomodoro();
-});
-
-window.NotchPomodoro = Object.freeze({
-  getState: () => ({ taskId: pomodoroTaskId, running: pomodoroRunning, started: pomodoroStarted, remainingSeconds: pomodoroRemaining }),
-  startForTask(id) {
-    const task = PRIORITIES.flatMap((category) => data[category]).find((item) => item.id === id && !item.done);
-    if (!task) return false;
-    if (pomodoroStarted && pomodoroTaskId !== id) {
-      showStatusToast('请先结束或重置当前计时，再开始另一项任务');
-      return false;
-    }
-    pomodoroTaskId = id;
-    if (!pomodoroRunning) pomodoroToggle?.click();
-    return pomodoroRunning;
-  },
-  pause() { if (pomodoroRunning) pomodoroToggle?.click(); },
-  stop() { pomodoroReset?.click(); },
-});
-document.addEventListener('notch:todos-changed', () => {
-  if (!pomodoroTaskId) return;
-  const task = PRIORITIES.flatMap((category) => data[category]).find((item) => item.id === pomodoroTaskId);
-  if (!task || task.done) pomodoroReset?.click();
 });
 renderPomodoro();
 
@@ -2133,11 +2173,11 @@ if (noteInput) {
   const saveNote = () => {
     if (noteTimer) clearTimeout(noteTimer);
     noteTimer = null;
-    if (window.__notchWorkspaceHydrating) return;
+    if (workspaceReloadPending) return;
     try {
       localStorage.setItem(NOTE_KEY, noteInput.value);
     } catch (e) {
-      showStatusToast('速记尚未保存，内容仍保留在编辑框中', { duration: 6000 });
+      // ignore quota errors
     }
   };
 
@@ -2181,14 +2221,6 @@ function loadNoteArchive() {
 }
 
 let selectedNoteId = '';
-// Drafts outlive any particular editor element. Tab changes, search, and model
-// title updates may rebuild the library while a local write is still failing.
-const noteDrafts = new Map();
-
-function noteWithDraft(note) {
-  const draft = noteDrafts.get(note.id);
-  return draft ? { ...note, ...draft } : note;
-}
 
 function noteArchiveTitle(note) {
   return String(note && note.title || '').trim() || '未命名笔记';
@@ -2212,8 +2244,7 @@ function noteArchiveTime(timestamp) {
 function renderNotesDetail(notes = loadNoteArchive()) {
   if (!notesDetail) return;
   notesDetail.replaceChildren();
-  const storedNote = notes.find((item) => item.id === selectedNoteId);
-  const note = storedNote && noteWithDraft(storedNote);
+  const note = notes.find((item) => item.id === selectedNoteId);
   if (!note) {
     const empty = document.createElement('div');
     empty.className = 'notes-detail-empty';
@@ -2240,16 +2271,10 @@ function renderNotesDetail(notes = loadNoteArchive()) {
   title.setAttribute('aria-label', '笔记标题，可直接修改');
   const time = document.createElement('time');
   time.className = 'notes-detail-time';
-  time.textContent = noteDrafts.has(note.id) ? '尚未保存 · 草稿已保留' : `更新于 ${noteArchiveTime(note.updatedAt)}`;
+  time.textContent = `更新于 ${noteArchiveTime(note.updatedAt)}`;
   heading.append(title, time);
   const actions = document.createElement('div');
   actions.className = 'notes-detail-actions';
-  const retry = document.createElement('button');
-  retry.type = 'button';
-  retry.className = 'workspace-button compact';
-  retry.dataset.action = 'retry-note-save';
-  retry.textContent = '重试保存';
-  retry.hidden = !noteDrafts.has(note.id);
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'notes-delete';
@@ -2257,7 +2282,7 @@ function renderNotesDetail(notes = loadNoteArchive()) {
   remove.setAttribute('aria-label', '删除笔记');
   remove.title = '删除笔记';
   remove.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M7 7l1 12h10l1-12"/></svg>';
-  actions.append(retry, remove);
+  actions.append(remove);
   header.append(heading, actions);
 
   const editor = document.createElement('textarea');
@@ -2273,12 +2298,12 @@ function renderNotesDetail(notes = loadNoteArchive()) {
 }
 
 let notesSaveTimer = null;
+let pendingNotesEditor = null;
 const noteTitleAttempts = new Set();
 
 async function requestNoteTitle(note) {
   if (
     !note
-    || noteDrafts.has(note.id)
     || note.title
     || note.titleSource === 'user'
     || !String(note.content || '').trim()
@@ -2288,8 +2313,6 @@ async function requestNoteTitle(note) {
   noteTitleAttempts.add(note.id);
   const expectedContent = note.content;
   const result = await window.notchAPI.organizeMaterial({ kind: 'note', text: expectedContent }).catch(() => null);
-  if (window.__notchWorkspaceHydrating) return;
-  if (noteDrafts.has(note.id)) { noteTitleAttempts.delete(note.id); return; }
   if (!result?.ok || !result.title) {
     noteTitleAttempts.delete(note.id);
     return;
@@ -2305,7 +2328,7 @@ async function requestNoteTitle(note) {
     noteTitleAttempts.delete(note.id);
     return;
   }
-  localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(next));
+  localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(next.slice(0, 200)));
   renderNotesLibrary();
 }
 
@@ -2314,12 +2337,8 @@ function updateSavedNotePresentation(note) {
   const title = noteArchiveTitle(note);
   const detailTitle = notesDetail?.querySelector('.notes-detail-title');
   const detailTime = notesDetail?.querySelector('.notes-detail-time');
-  if (detailTitle?.dataset.noteId === note.id) {
-    if (document.activeElement !== detailTitle) detailTitle.value = note.title || '';
-    if (detailTime) detailTime.textContent = `已保存 · ${noteArchiveTime(note.updatedAt)}`;
-    const retry = notesDetail.querySelector('[data-action="retry-note-save"]');
-    if (retry) retry.hidden = true;
-  }
+  if (detailTitle && document.activeElement !== detailTitle) detailTitle.value = note.title || '';
+  if (detailTime) detailTime.textContent = `已保存 · ${noteArchiveTime(note.updatedAt)}`;
   const row = notesList?.querySelector(`[data-note-id="${CSS.escape(note.id)}"]`);
   if (!row) return;
   const rowTitle = row.querySelector('strong');
@@ -2330,67 +2349,50 @@ function updateSavedNotePresentation(note) {
   if (rowTime) rowTime.textContent = noteArchiveTime(note.updatedAt);
 }
 
-function persistNoteDrafts() {
-  if (!noteDrafts.size) return;
-  let notes = loadNoteArchive();
-  const drafts = [...noteDrafts.entries()];
-  for (const [id, draft] of drafts) {
-    if (!notes.some((note) => note.id === id)) throw new Error('笔记原记录不可用，草稿仍保留');
-    if (Object.hasOwn(draft, 'content')) notes = window.NotchDomain.updateNoteInArchive(notes, id, draft.content, draft.updatedAt);
-    if (Object.hasOwn(draft, 'title')) notes = window.NotchDomain.updateNoteTitle(notes, id, draft.title, draft.updatedAt);
+function persistNotesEditor(editor) {
+  if (!editor || !editor.dataset.noteId) return;
+  const notes = window.NotchDomain.updateNoteInArchive(
+    loadNoteArchive(),
+    editor.dataset.noteId,
+    editor.value,
+    Date.now()
+  );
+  localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(notes.slice(0, 200)));
+  const updated = notes.find((note) => note.id === editor.dataset.noteId);
+  if (localStorage.getItem(NOTE_ACTIVE_ARCHIVE_KEY) === editor.dataset.noteId && noteInput) {
+    noteInput.value = editor.value;
+    localStorage.setItem(NOTE_KEY, editor.value);
+    renderNotePreview();
   }
-  // Commit the title and body together before clearing their recovery state.
-  localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(notes));
-  const activeId = localStorage.getItem(NOTE_ACTIVE_ARCHIVE_KEY);
-  for (const [id, draft] of drafts) {
-    if (activeId === id && noteInput && Object.hasOwn(draft, 'content')) {
-      noteInput.value = draft.content;
-      localStorage.setItem(NOTE_KEY, draft.content);
-      renderNotePreview();
-    }
-    noteDrafts.delete(id);
-    updateSavedNotePresentation(notes.find((note) => note.id === id));
-  }
+  updateSavedNotePresentation(updated);
+  if (pendingNotesEditor === editor) pendingNotesEditor = null;
 }
 
 function flushNotesEditorSave() {
-  if (window.__notchWorkspaceHydrating) return;
+  if (workspaceReloadPending) return;
   if (notesSaveTimer) clearTimeout(notesSaveTimer);
   notesSaveTimer = null;
-  persistNoteDrafts();
+  const editor = pendingNotesEditor;
+  pendingNotesEditor = null;
+  if (editor) persistNotesEditor(editor);
 }
 
-function showNoteDraftError() {
-  const title = notesDetail?.querySelector('.notes-detail-title');
-  if (title && noteDrafts.has(title.dataset.noteId)) {
-    const time = notesDetail.querySelector('.notes-detail-time');
-    if (time) time.textContent = '尚未保存 · 草稿已保留，请释放空间后重试';
-    const retry = notesDetail.querySelector('[data-action="retry-note-save"]');
-    if (retry) retry.hidden = false;
-  }
-}
-
-function tryFlushNotesEditorSave() {
-  try { flushNotesEditorSave(); return true; }
-  catch { showNoteDraftError(); return false; }
-}
-
-function scheduleNotesEditorSave(editor, field = 'content') {
-  const id = editor?.dataset.noteId;
-  if (!id) return;
-  noteDrafts.set(id, { ...noteDrafts.get(id), [field]: editor.value, updatedAt: Date.now() });
+function scheduleNotesEditorSave(editor) {
+  pendingNotesEditor = editor;
   if (notesSaveTimer) clearTimeout(notesSaveTimer);
   const time = notesDetail?.querySelector('.notes-detail-time');
   if (time) time.textContent = '正在保存…';
   notesSaveTimer = setTimeout(() => {
     notesSaveTimer = null;
-    tryFlushNotesEditorSave();
+    const pending = pendingNotesEditor;
+    pendingNotesEditor = null;
+    if (pending) persistNotesEditor(pending);
   }, 220);
 }
 
 function renderNotesLibrary() {
   if (!notesList) return;
-  const archive = loadNoteArchive().map(noteWithDraft);
+  const archive = loadNoteArchive();
   const notes = window.NotchDomain.filterNotes(archive, notesSearch?.value || '');
   if (notesCount) notesCount.textContent = `${archive.length} 篇`;
   if (!notes.some((note) => note.id === selectedNoteId)) selectedNoteId = notes[0]?.id || '';
@@ -2422,19 +2424,38 @@ function renderNotesLibrary() {
   renderNotesDetail(notes);
 }
 
+// 添加独立资料笔记，不改变首页速记或用户正在编辑的已存笔记。
+window.NotchNotes = {
+  has(id) { return loadNoteArchive().some((note) => note.id === id); },
+  append({ id, title, content } = {}) {
+    if (typeof id !== 'string' || !id.trim() || typeof content !== 'string' || !content.trim()) {
+      return { ok: false, error: 'invalid_note' };
+    }
+    try {
+      flushNotesEditorSave();
+      const notes = loadNoteArchive();
+      if (notes.some((note) => note.id === id)) return { ok: true, existed: true, id };
+      if (notes.length >= 200) return { ok: false, error: 'archive_full' };
+      const now = Date.now();
+      const note = window.NotchDomain.normalizeNoteArchive([{
+        id, title: String(title || ''), titleSource: 'user', content,
+        createdAt: now, updatedAt: now,
+      }])[0];
+      localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify([note, ...notes]));
+      if (activeTab === 'notes') renderNotesLibrary();
+      return { ok: true, existed: false, id };
+    } catch (error) {
+      return { ok: false, error: 'storage_failed' };
+    }
+  },
+};
+
 noteSaveButton?.addEventListener('click', () => {
-  const rawContent = noteInput?.value || '';
-  const content = rawContent.trim();
+  const content = noteInput?.value.trim() || '';
   if (!content) {
     showStatusToast('先写点内容再存档');
     return;
   }
-  if (!tryFlushNotesEditorSave()) {
-    if (noteInput) noteInput.value = rawContent;
-    showStatusToast('笔记草稿尚未保存，请释放存储空间后重试', { duration: 5000 });
-    return;
-  }
-  if (noteInput) noteInput.value = rawContent;
   const notes = loadNoteArchive();
   let activeId = localStorage.getItem(NOTE_ACTIVE_ARCHIVE_KEY) || '';
   const existing = notes.find((item) => item.id === activeId);
@@ -2445,14 +2466,9 @@ noteSaveButton?.addEventListener('click', () => {
     activeId = generateId();
     notes.unshift({ id: activeId, content, createdAt: Date.now(), updatedAt: Date.now() });
   }
-  try {
-    localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(notes));
-    localStorage.setItem(NOTE_ACTIVE_ARCHIVE_KEY, activeId);
-    localStorage.setItem(NOTE_KEY, noteInput.value);
-  } catch {
-    showStatusToast('笔记未能保存，内容仍保留。请释放存储空间后重试。', { duration: 6000 });
-    return;
-  }
+  localStorage.setItem(NOTE_ACTIVE_ARCHIVE_KEY, activeId);
+  localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(notes.slice(0, 200)));
+  localStorage.setItem(NOTE_KEY, noteInput.value);
   selectedNoteId = activeId;
   renderNotesLibrary();
   showStatusToast('笔记已保存');
@@ -2461,20 +2477,27 @@ noteSaveButton?.addEventListener('click', () => {
 notesList?.addEventListener('click', (event) => {
   const row = event.target.closest('[data-note-id]');
   if (!row) return;
-  tryFlushNotesEditorSave();
+  flushNotesEditorSave();
   selectedNoteId = row.dataset.noteId;
   renderNotesLibrary();
 });
 
 notesSearch?.addEventListener('input', () => {
-  tryFlushNotesEditorSave();
+  flushNotesEditorSave();
   renderNotesLibrary();
 });
 
 notesDetail?.addEventListener('input', (event) => {
   const title = event.target.closest('.notes-detail-title');
   if (title?.dataset.noteId) {
-    scheduleNotesEditorSave(title, 'title');
+    const notes = window.NotchDomain.updateNoteTitle(
+      loadNoteArchive(),
+      title.dataset.noteId,
+      title.value,
+      Date.now()
+    );
+    localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(notes.slice(0, 200)));
+    updateSavedNotePresentation(notes.find((note) => note.id === title.dataset.noteId));
     return;
   }
   const editor = event.target.closest('#notes-editor');
@@ -2484,25 +2507,22 @@ notesDetail?.addEventListener('input', (event) => {
 notesDetail?.addEventListener('focusout', (event) => {
   const title = event.target.closest('.notes-detail-title');
   if (title?.dataset.noteId) {
-    if (!tryFlushNotesEditorSave()) return;
     const note = loadNoteArchive().find((item) => item.id === title.dataset.noteId);
     if (note) title.value = note.title;
   }
-  if (event.target.closest('#notes-editor')) tryFlushNotesEditorSave();
+  if (event.target.closest('#notes-editor')) flushNotesEditorSave();
 });
 
 notesDetail?.addEventListener('click', (event) => {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (!action) return;
-  if (!tryFlushNotesEditorSave()) return;
-  if (action === 'retry-note-save') return;
+  flushNotesEditorSave();
   const notes = loadNoteArchive();
   const note = notes.find((item) => item.id === selectedNoteId);
   if (!note) return;
   if (action === 'delete-note') {
     const next = notes.filter((item) => item.id !== note.id);
-    try { localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(next)); }
-    catch { showStatusToast('笔记未能删除，请释放存储空间后重试', { duration: 5000 }); return; }
+    localStorage.setItem(NOTE_ARCHIVE_KEY, JSON.stringify(next));
     if (localStorage.getItem(NOTE_ACTIVE_ARCHIVE_KEY) === note.id) {
       localStorage.removeItem(NOTE_ACTIVE_ARCHIVE_KEY);
     }
@@ -2514,9 +2534,9 @@ notesDetail?.addEventListener('click', (event) => {
 });
 
 document.addEventListener('notch:tabchange', (event) => {
-  if (event.detail?.tab !== 'notes') tryFlushNotesEditorSave();
+  if (event.detail?.tab !== 'notes') flushNotesEditorSave();
 });
-window.addEventListener('beforeunload', tryFlushNotesEditorSave);
+window.addEventListener('beforeunload', flushNotesEditorSave);
 
 if (noteFormatActions) {
   noteFormatActions.addEventListener('mousedown', (event) => {
@@ -2561,17 +2581,18 @@ if (notePreview) {
 const HOME_ORDER_KEY = 'notch-home-order-v3';
 const HOME_SIZES_KEY = 'notch-home-widget-sizes-v2';
 const HOME_HIDDEN_MODULES_KEY = 'notch-home-hidden-modules-v1';
-const HOME_MODULE_REGISTRY = ['music', 'pomodoro', 'recorder', 'windows', 'mirror', 'note', 'commands', 'taskMap'];
-const HOME_ORDER_DEFAULTS = ['music', 'pomodoro', 'windows', 'recorder', 'mirror', 'note', 'commands', 'taskMap'];
+const HOME_DEFAULT_HIDDEN = [];
+const HOME_MODULE_REGISTRY = ['pomodoro', 'windows', 'recorder', 'note', 'commands', 'news'];
+const unavailableHomeModules = window.NotchPlatform.capabilities(window.notchAPI?.platform || 'darwin').unavailableHomeModules;
+const effectiveHomeHidden = (hidden) => window.NotchPlatform.effectiveHiddenModules(hidden, HOME_MODULE_REGISTRY, unavailableHomeModules);
+const HOME_ORDER_DEFAULTS = ['pomodoro', 'windows', 'recorder', 'note', 'commands', 'news'];
 const HOME_SIZE_DEFAULTS = {
-  music: 'medium',
-  windows: 'large',
-  recorder: 'small',
-  mirror: 'medium',
+  windows: 'medium',
+  recorder: 'medium',
   note: 'medium',
-  commands: 'mini',
-  pomodoro: 'mini',
-  taskMap: 'medium',
+  commands: 'medium',
+  pomodoro: 'medium',
+  news: 'medium',
 };
 const HOME_SIZE_LABELS = { mini: '迷你', small: '小', medium: '中', large: '大' };
 const homeBento = document.getElementById('home-bento');
@@ -2580,30 +2601,21 @@ const homeTiles = homeBento
   : [];
 
 function loadHomeOrder() {
+  const normalize = (ids) => {
+    const retained = [...new Set(ids)].filter((id) => HOME_MODULE_REGISTRY.includes(id));
+    return [...retained, ...HOME_ORDER_DEFAULTS.filter((id) => !retained.includes(id))];
+  };
   try {
-    const rawSaved = JSON.parse(localStorage.getItem(HOME_ORDER_KEY) || 'null');
-    const saved = Array.isArray(rawSaved)
-      ? rawSaved.map((id) => id === 'character' ? 'music' : id)
-      : rawSaved;
-    if (
-      Array.isArray(saved)
-      && saved.length >= HOME_ORDER_DEFAULTS.length - 1
-      && saved.length <= HOME_ORDER_DEFAULTS.length
-      && new Set(saved).size === saved.length
-      && saved.every((id) => HOME_ORDER_DEFAULTS.includes(id))
-    ) return [...saved, ...HOME_ORDER_DEFAULTS.filter((id) => !saved.includes(id))];
+    const saved = JSON.parse(localStorage.getItem(HOME_ORDER_KEY) || 'null');
+    if (Array.isArray(saved)) return normalize(saved);
 
-    // 从旧固定槽位布局平滑迁移；原时钟 / 人物位置由音乐组件接管。
+    // 旧固定槽位只迁移仍存在的组件，保留相对顺序，再补齐新增组件。
     const legacy = JSON.parse(localStorage.getItem('notch-home-layout-v2') || 'null');
     const legacySlots = ['tall-left', 'small-top', 'medium-top', 'square-top', 'tall-right', 'wide-bottom'];
-    if (legacy && typeof legacy === 'object') {
-      const migrated = Object.entries(legacy)
+    if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+      return normalize(Object.entries(legacy)
         .sort((a, b) => legacySlots.indexOf(a[1]) - legacySlots.indexOf(b[1]))
-        .map(([id]) => id === 'clock' || id === 'character' ? 'music' : id)
-        .filter((id) => HOME_ORDER_DEFAULTS.includes(id));
-      if (migrated.length >= HOME_ORDER_DEFAULTS.length - 1 && new Set(migrated).size === migrated.length) {
-        return [...migrated, ...HOME_ORDER_DEFAULTS.filter((id) => !migrated.includes(id))];
-      }
+        .map(([id]) => id));
     }
   } catch (error) {
     // 使用默认顺序。
@@ -2611,23 +2623,28 @@ function loadHomeOrder() {
   return [...HOME_ORDER_DEFAULTS];
 }
 
+const isAutomaticHomeLayout = (hidden) => effectiveHomeHidden(hidden).length > 0;
+
+function normalizePreferredHomeSizes(value, preferredId = '', hidden = hiddenHomeModules) {
+  const sizes = window.NotchDomain.normalizeHomeWidgetSizes(value, HOME_SIZE_DEFAULTS, '', Infinity);
+  if (isAutomaticHomeLayout(hidden)) return sizes;
+  const effectiveHidden = effectiveHomeHidden(hidden);
+  const visibleDefaults = Object.fromEntries(Object.entries(HOME_SIZE_DEFAULTS).filter(([id]) => !effectiveHidden.includes(id)));
+  return { ...sizes, ...window.NotchDomain.normalizeHomeWidgetSizes(sizes, visibleDefaults, preferredId, 48) };
+}
+
 function loadHomeSizes() {
   try {
-    return window.NotchDomain.normalizeHomeWidgetSizes(
-      JSON.parse(localStorage.getItem(HOME_SIZES_KEY) || 'null'),
-      HOME_SIZE_DEFAULTS,
-      '',
-      48
-    );
+    return normalizePreferredHomeSizes(JSON.parse(localStorage.getItem(HOME_SIZES_KEY) || 'null'));
   } catch (error) {
-    return { ...HOME_SIZE_DEFAULTS };
+    return normalizePreferredHomeSizes(null);
   }
 }
 
 function loadHiddenHomeModules() {
   try {
     const rawText = localStorage.getItem(HOME_HIDDEN_MODULES_KEY);
-    if (rawText === null) return { hiddenIds: [], needsRepair: false };
+    if (rawText === null) return { hiddenIds: [...HOME_DEFAULT_HIDDEN], needsRepair: false };
     const parsed = JSON.parse(rawText);
     const hiddenIds = window.NotchDomain.normalizeHiddenHomeModules(parsed, HOME_MODULE_REGISTRY);
     return {
@@ -2635,14 +2652,14 @@ function loadHiddenHomeModules() {
       needsRepair: JSON.stringify(parsed) !== JSON.stringify(hiddenIds),
     };
   } catch (error) {
-    return { hiddenIds: [], needsRepair: true };
+    return { hiddenIds: [...HOME_DEFAULT_HIDDEN], needsRepair: true };
   }
 }
 
 let homeOrder = loadHomeOrder();
-let homeSizes = loadHomeSizes();
 const loadedHomeVisibility = loadHiddenHomeModules();
 let hiddenHomeModules = loadedHomeVisibility.hiddenIds;
+let homeSizes = loadHomeSizes();
 let homeVisibilityPersisted = true;
 let homeLayoutReadOnly = false;
 let homeLayoutMotionGeneration = 0;
@@ -2673,6 +2690,7 @@ function saveHiddenHomeModules() {
 if (loadedHomeVisibility.needsRepair) saveHiddenHomeModules();
 
 function resolveValidatedHomeLayout(hiddenIds, order = homeOrder, sizes = homeSizes) {
+  hiddenIds = effectiveHomeHidden(hiddenIds);
   const visibleIds = HOME_MODULE_REGISTRY.filter((id) => !hiddenIds.includes(id));
   const layout = window.NotchDomain.resolveHomeWidgetLayout(order, sizes, hiddenIds, 12, 4);
   return window.NotchDomain.validateHomeWidgetLayout(layout, visibleIds, 12, 4)
@@ -2753,7 +2771,7 @@ function applyHomeLayout(layout, { reason = 'initial' } = {}) {
   const beforeState = reason === 'initial' || reason === 'rollback'
     ? null
     : captureHomeLayoutVisualState();
-  const automaticLayout = !homeLayoutReadOnly && hiddenHomeModules.length > 0;
+  const automaticLayout = !homeLayoutReadOnly && isAutomaticHomeLayout(hiddenHomeModules);
   homeBento.dataset.layoutMode = homeLayoutReadOnly ? 'safe' : automaticLayout ? 'automatic' : 'preferred';
   homeTiles.forEach((tile) => {
     const moduleId = tile.dataset.homeModule;
@@ -2813,20 +2831,34 @@ if (homeTiles.length !== HOME_MODULE_REGISTRY.length
 
 let initialHomeLayout = resolveValidatedHomeLayout(hiddenHomeModules);
 if (!initialHomeLayout) {
-  initialHomeLayout = resolveValidatedHomeLayout([], HOME_ORDER_DEFAULTS, HOME_SIZE_DEFAULTS);
+  initialHomeLayout = resolveValidatedHomeLayout(HOME_DEFAULT_HIDDEN, HOME_ORDER_DEFAULTS, HOME_SIZE_DEFAULTS);
   homeLayoutReadOnly = true;
   console.error('Homepage layout validation failed; using read-only defaults.');
 }
 if (!initialHomeLayout) throw new Error('Default homepage layout validation failed.');
 applyHomeLayout(initialHomeLayout, { reason: 'initial' });
+// 只迁移已有键，避免首次打开时抢先写入默认值、阻止工作区异步恢复。
+if (!homeLayoutReadOnly) {
+  try {
+    if (localStorage.getItem(HOME_ORDER_KEY) !== null) {
+      localStorage.setItem(HOME_ORDER_KEY, JSON.stringify(homeOrder));
+    }
+    if (localStorage.getItem(HOME_SIZES_KEY) !== null) {
+      localStorage.setItem(HOME_SIZES_KEY, JSON.stringify(homeSizes));
+    }
+  } catch (error) {
+    // 无法写回时仍使用已验证的内存布局。
+  }
+}
 
 function visibilitySnapshot() {
-  const effectiveHiddenIds = homeLayoutReadOnly ? [] : hiddenHomeModules;
+  const effectiveHiddenIds = effectiveHomeHidden(homeLayoutReadOnly ? HOME_DEFAULT_HIDDEN : hiddenHomeModules);
   return {
     hiddenIds: [...effectiveHiddenIds],
     visibleIds: HOME_MODULE_REGISTRY.filter((id) => !effectiveHiddenIds.includes(id)),
     storedHiddenIds: [...hiddenHomeModules],
-    automaticLayout: !homeLayoutReadOnly && hiddenHomeModules.length > 0,
+    automaticLayout: !homeLayoutReadOnly && isAutomaticHomeLayout(effectiveHiddenIds),
+    unavailableIds: [...unavailableHomeModules],
     readOnly: homeLayoutReadOnly,
     persisted: homeVisibilityPersisted,
   };
@@ -2834,6 +2866,11 @@ function visibilitySnapshot() {
 
 function setHomeModuleVisible(moduleId, visible) {
   const current = [...hiddenHomeModules];
+  if (unavailableHomeModules.includes(moduleId)) return { ok: false, changed: false, error: 'unsupported', hiddenIds: current, persisted: homeVisibilityPersisted };
+  const currentlyVisible = visibilitySnapshot().visibleIds;
+  if (!visible && currentlyVisible.includes(moduleId) && currentlyVisible.length === 1) {
+    return { ok: false, changed: false, error: 'at_least_one_required', hiddenIds: current, persisted: homeVisibilityPersisted };
+  }
   if (homeLayoutReadOnly) {
     return { ok: false, changed: false, error: 'layout_read_only', hiddenIds: current, persisted: homeVisibilityPersisted };
   }
@@ -2852,20 +2889,23 @@ function setHomeModuleVisible(moduleId, visible) {
     && window.NotchWorkspace?.isRecordingActive?.()) {
     return { ok: false, changed: false, error: 'recording_active', hiddenIds: current, persisted: homeVisibilityPersisted };
   }
-  const layout = resolveValidatedHomeLayout(next.hiddenIds);
+  const previousSizes = homeSizes;
+  const nextSizes = normalizePreferredHomeSizes(homeSizes, '', next.hiddenIds);
+  const layout = resolveValidatedHomeLayout(next.hiddenIds, homeOrder, nextSizes);
   const currentLayout = resolveValidatedHomeLayout(current);
   if (!layout || !currentLayout) {
     return { ok: false, changed: false, error: 'layout_invalid', hiddenIds: current, persisted: homeVisibilityPersisted };
   }
-  if (moduleId === 'mirror' && visible === false) stopMirror();
   try {
     const activeElement = document.activeElement;
     const changingTile = homeTiles.find((tile) => tile.dataset.homeModule === moduleId);
     if (visible === false && changingTile?.contains(activeElement)) activeElement.blur();
     hiddenHomeModules = next.hiddenIds;
+    homeSizes = nextSizes;
     applyHomeLayout(layout, { reason: 'visibility' });
   } catch (error) {
     hiddenHomeModules = current;
+    homeSizes = previousSizes;
     try { applyHomeLayout(currentLayout, { reason: 'rollback' }); } catch (rollbackError) {}
     return { ok: false, changed: false, error: 'dom_apply_failed', hiddenIds: current, persisted: homeVisibilityPersisted };
   }
@@ -2960,15 +3000,15 @@ if (homeBento) {
     if (!sizeButton) return;
     event.preventDefault();
     event.stopPropagation();
-    if (hiddenHomeModules.length > 0 || homeLayoutReadOnly) return;
+    if (isAutomaticHomeLayout(hiddenHomeModules) || homeLayoutReadOnly) return;
     const moduleId = sizeButton.dataset.widgetSizeCycle;
     const sequence = ['mini', 'small', 'medium', 'large'];
     const current = homeSizes[moduleId] || HOME_SIZE_DEFAULTS[moduleId];
     const requested = sequence[(sequence.indexOf(current) + 1) % sequence.length];
-    homeSizes = window.NotchDomain.normalizeHomeWidgetSizes({
+    homeSizes = normalizePreferredHomeSizes({
       ...homeSizes,
       [moduleId]: requested,
-    }, HOME_SIZE_DEFAULTS, moduleId, 48);
+    }, moduleId);
     const layout = resolveValidatedHomeLayout(hiddenHomeModules);
     if (layout) {
       applyHomeLayout(layout, { reason: 'size' });
@@ -3055,239 +3095,6 @@ function bindDockSurface(surface, selector, maxScale = 1.14) {
     bindDockSurface(surface, itemSelector, scale);
   });
 });
-
-// ============ 首页 · 人像镜面（局部水波折射） ============
-const homeMirror = document.querySelector('.home-mirror');
-const mirrorStage = document.getElementById('mirror-stage');
-const mirrorPhotos = Array.from(document.querySelectorAll('.mirror-photo'));
-
-function applyMirrorCover(dataUrl) {
-  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return;
-  mirrorPhotos.forEach((image) => { image.src = dataUrl; });
-}
-
-if (window.notchAPI && typeof window.notchAPI.getMirrorImage === 'function') {
-  window.notchAPI.getMirrorImage().then(applyMirrorCover).catch(() => {});
-}
-if (window.notchAPI && typeof window.notchAPI.onMirrorImageChanged === 'function') {
-  window.notchAPI.onMirrorImageChanged(applyMirrorCover);
-}
-const mirrorVideo = document.getElementById('mirror-video');
-const mirrorDisplacement = document.getElementById('mirror-displacement');
-const mirrorWaterCanvas = document.getElementById('mirror-water-canvas');
-const mirrorPixelReveal = document.getElementById('mirror-pixel-reveal');
-let mirrorLiquidFrame = null;
-let mirrorLiquidScale = 0;
-let mirrorLastPoint = null;
-let mirrorWaterFrame = null;
-let mirrorLastTrailAt = 0;
-let mirrorWaterRipples = [];
-let mirrorStream = null;
-let mirrorStarting = false;
-let mirrorZoom = 1;
-
-function replayMirrorPixelReveal() {
-  if (!mirrorPixelReveal || !homeMirror || activeTab !== 'home') return;
-  if (!mirrorPixelReveal.childElementCount) {
-    const fragment = document.createDocumentFragment();
-    for (let index = 0; index < 80; index++) {
-      const pixel = document.createElement('i');
-      const row = Math.floor(index / 10);
-      const column = index % 10;
-      pixel.style.setProperty('--pixel-delay', `${(row * 24 + column * 13 + ((row + column) % 3) * 17)}ms`);
-      fragment.appendChild(pixel);
-    }
-    mirrorPixelReveal.appendChild(fragment);
-  }
-  mirrorPixelReveal.classList.remove('revealing');
-  void mirrorPixelReveal.offsetWidth;
-  mirrorPixelReveal.classList.add('revealing');
-  setTimeout(() => mirrorPixelReveal.classList.remove('revealing'), 1120);
-}
-
-function resizeMirrorWaterCanvas() {
-  if (!mirrorWaterCanvas || !mirrorStage) return null;
-  const bounds = mirrorStage.getBoundingClientRect();
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const width = Math.max(1, Math.round(bounds.width * dpr));
-  const height = Math.max(1, Math.round(bounds.height * dpr));
-  if (mirrorWaterCanvas.width !== width || mirrorWaterCanvas.height !== height) {
-    mirrorWaterCanvas.width = width;
-    mirrorWaterCanvas.height = height;
-  }
-  return { bounds, dpr };
-}
-
-function animateMirrorWater(now) {
-  const metrics = resizeMirrorWaterCanvas();
-  const context = mirrorWaterCanvas?.getContext('2d');
-  if (!metrics || !context) {
-    mirrorWaterFrame = null;
-    return;
-  }
-  context.clearRect(0, 0, mirrorWaterCanvas.width, mirrorWaterCanvas.height);
-  mirrorWaterRipples = mirrorWaterRipples.filter((ripple) => now - ripple.startedAt < 1250);
-  context.save();
-  context.scale(metrics.dpr, metrics.dpr);
-  context.globalCompositeOperation = 'screen';
-  mirrorWaterRipples.forEach((ripple) => {
-    const progress = Math.min(1, (now - ripple.startedAt) / 1250);
-    const eased = 1 - (1 - progress) ** 3;
-    for (let ring = 0; ring < 3; ring++) {
-      const radius = 6 + eased * (34 + ripple.speed * 1.8) + ring * 7;
-      context.beginPath();
-      context.arc(ripple.x, ripple.y, radius, 0, Math.PI * 2);
-      context.strokeStyle = `rgba(190, 222, 255, ${Math.max(0, (1 - progress) * (0.17 - ring * 0.035))})`;
-      context.lineWidth = Math.max(0.65, 1.55 - progress);
-      context.stroke();
-    }
-  });
-  context.restore();
-  if (mirrorWaterRipples.length) mirrorWaterFrame = requestAnimationFrame(animateMirrorWater);
-  else mirrorWaterFrame = null;
-}
-
-function addMirrorWaterRipple(x, y, speed) {
-  mirrorWaterRipples.push({ x, y, speed: Math.min(18, speed), startedAt: performance.now() });
-  if (mirrorWaterRipples.length > 18) mirrorWaterRipples.shift();
-  if (!mirrorWaterFrame) mirrorWaterFrame = requestAnimationFrame(animateMirrorWater);
-}
-
-function setMirrorZoom(value) {
-  mirrorZoom = value;
-  mirrorStage?.style.setProperty('--mirror-zoom', String(mirrorZoom));
-}
-
-function stopMirror() {
-  if (mirrorStream) {
-    mirrorStream.getTracks().forEach((track) => track.stop());
-    mirrorStream = null;
-  }
-  if (mirrorVideo) {
-    mirrorVideo.pause();
-    mirrorVideo.srcObject = null;
-  }
-  mirrorStarting = false;
-  setMirrorZoom(1);
-  if (mirrorLiquidFrame) cancelAnimationFrame(mirrorLiquidFrame);
-  mirrorLiquidFrame = null;
-  mirrorLiquidScale = 0;
-  mirrorLastPoint = null;
-  mirrorWaterRipples = [];
-  if (mirrorWaterFrame) cancelAnimationFrame(mirrorWaterFrame);
-  mirrorWaterFrame = null;
-  const waterContext = mirrorWaterCanvas?.getContext('2d');
-  waterContext?.clearRect(0, 0, mirrorWaterCanvas.width, mirrorWaterCanvas.height);
-  mirrorDisplacement?.setAttribute('scale', '0');
-  homeMirror?.classList.remove('live', 'camera-starting', 'liquid-active', 'ripple-active');
-  mirrorStage?.setAttribute('aria-label', '打开实时镜子');
-  mirrorStage?.setAttribute('aria-pressed', 'false');
-  mirrorStage?.removeAttribute('aria-busy');
-}
-
-async function startMirror() {
-  if (mirrorStarting || mirrorStream || !mirrorVideo) return;
-  mirrorStarting = true;
-  homeMirror?.classList.add('camera-starting');
-  mirrorStage?.setAttribute('aria-busy', 'true');
-  try {
-    const permitted = !window.notchAPI || typeof window.notchAPI.ensureCamera !== 'function'
-      ? true
-      : await window.notchAPI.ensureCamera();
-    if (!permitted) throw new Error('camera_permission_denied');
-    if (!mirrorStarting || !isExpanded || activeTab !== 'home') return;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: 'user',
-        width: { ideal: 1280 },
-        height: { ideal: 1280 },
-      },
-    });
-    if (!isExpanded || activeTab !== 'home' || !mirrorStarting) {
-      stream.getTracks().forEach((track) => track.stop());
-      return;
-    }
-    mirrorStream = stream;
-    mirrorVideo.srcObject = stream;
-    await mirrorVideo.play();
-    setMirrorZoom(1);
-    homeMirror?.classList.remove('liquid-active');
-    homeMirror?.classList.add('live');
-    mirrorStage?.setAttribute('aria-label', '关闭实时镜子');
-    mirrorStage?.setAttribute('aria-pressed', 'true');
-  } catch (error) {
-    stopMirror();
-    const denied = error && (
-      error.name === 'NotAllowedError' || error.message === 'camera_permission_denied'
-    );
-    showStatusToast(denied ? '需要摄像头权限才能打开镜子' : '暂时无法打开摄像头');
-  } finally {
-    mirrorStarting = false;
-    homeMirror?.classList.remove('camera-starting');
-    mirrorStage?.removeAttribute('aria-busy');
-  }
-}
-
-function animateMirrorLiquid() {
-  // 慢衰减保留轨迹长尾，Canvas 同时绘制传播中的同心波。
-  mirrorLiquidScale += (0 - mirrorLiquidScale) * 0.035;
-  mirrorDisplacement?.setAttribute('scale', mirrorLiquidScale.toFixed(2));
-  if (mirrorLiquidScale > 0.35) {
-    mirrorLiquidFrame = requestAnimationFrame(animateMirrorLiquid);
-  } else {
-    mirrorLiquidFrame = null;
-  }
-}
-
-if (mirrorStage) {
-  mirrorStage.addEventListener('pointerenter', () => {
-    if (!mirrorStream) homeMirror?.classList.add('liquid-active');
-  });
-  mirrorStage.addEventListener('pointermove', (event) => {
-    if (mirrorStream) return;
-    const bounds = mirrorStage.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
-    const speed = mirrorLastPoint
-      ? Math.hypot(event.clientX - mirrorLastPoint.x, event.clientY - mirrorLastPoint.y)
-      : 0;
-    mirrorLastPoint = { x: event.clientX, y: event.clientY };
-    mirrorStage.style.setProperty('--liquid-x', `${(x * 100).toFixed(2)}%`);
-    mirrorStage.style.setProperty('--liquid-y', `${(y * 100).toFixed(2)}%`);
-    mirrorStage.style.setProperty('--liquid-shift-x', `${((0.5 - x) * 10).toFixed(2)}px`);
-    mirrorStage.style.setProperty('--liquid-shift-y', `${((0.5 - y) * 10).toFixed(2)}px`);
-    mirrorLiquidScale = Math.min(38, Math.max(mirrorLiquidScale, 14 + speed * 0.85));
-    if (event.timeStamp - mirrorLastTrailAt > 42 && speed > 1.5) {
-      mirrorLastTrailAt = event.timeStamp;
-      addMirrorWaterRipple(event.clientX - bounds.left, event.clientY - bounds.top, speed);
-    }
-    if (!mirrorLiquidFrame) mirrorLiquidFrame = requestAnimationFrame(animateMirrorLiquid);
-  });
-  mirrorStage.addEventListener('pointerleave', () => {
-    mirrorLastPoint = null;
-    homeMirror?.classList.remove('liquid-active');
-  });
-  mirrorStage.addEventListener('wheel', (event) => {
-    if (!window.NotchDomain.shouldHandleMirrorPinch({
-      live: Boolean(mirrorStream),
-      ctrlKey: event.ctrlKey,
-    })) return;
-    event.preventDefault();
-    setMirrorZoom(window.NotchDomain.adjustMirrorZoom(mirrorZoom, event.deltaY));
-  }, { passive: false });
-  mirrorStage.addEventListener('click', async () => {
-    if (mirrorStream || mirrorStarting) {
-      stopMirror();
-      return;
-    }
-    homeMirror?.classList.remove('ripple-active');
-    void mirrorStage.offsetWidth;
-    homeMirror?.classList.add('ripple-active');
-    setTimeout(() => homeMirror?.classList.remove('ripple-active'), 720);
-    await startMirror();
-  });
-}
 
 // ============ 首页 · 收藏剪贴 ============
 const clipfavListEl = document.getElementById('clipfav-list');
@@ -3859,178 +3666,9 @@ async function copyClipEntry(id) {
 // ---- IPC 推送监听 ----
 if (window.notchAPI && typeof window.notchAPI.onNewClipEntry === 'function') {
   window.notchAPI.onNewClipEntry((raw) => {
-    if (window.__notchWorkspaceHydrating) return;
     addClipEntry(raw);
   });
 }
-
-// Explicit quit is separate from collapsing/hiding the panel. Native menus,
-// Dock Quit, Cmd+Q and these buttons all enter the same main-process handshake.
-let quitRequestPromise = null;
-let prepareQuitPromise = null;
-let quitUiBusy = false;
-let interactionLockedBeforeQuit = false;
-const inertBeforeQuit = new Map();
-function setQuitUiBusy(busy) {
-  if (busy && !quitUiBusy) {
-    interactionLockedBeforeQuit = Boolean(window.__notchWorkspaceInteractionLocked);
-    window.__notchWorkspaceInteractionLocked = true;
-    document.querySelectorAll('#panels, .topbar [role="tablist"], [data-quick-capture], #panel > dialog').forEach((element) => {
-      inertBeforeQuit.set(element, element.inert);
-      element.inert = true;
-    });
-  } else if (!busy && quitUiBusy) {
-    window.__notchWorkspaceInteractionLocked = interactionLockedBeforeQuit;
-    inertBeforeQuit.forEach((previous, element) => { element.inert = previous; });
-    inertBeforeQuit.clear();
-  }
-  quitUiBusy = busy;
-  document.querySelectorAll('[data-app-quit]').forEach((button) => {
-    if (!button.dataset.quitLabel) button.dataset.quitLabel = button.textContent;
-    button.disabled = busy;
-    button.textContent = busy ? '正在退出…' : button.dataset.quitLabel;
-  });
-}
-
-function showQuitError(error) {
-  setQuitUiBusy(false);
-  quitRequestPromise = null;
-  const status = document.getElementById('app-quit-status');
-  if (status) {
-    status.hidden = false;
-    status.textContent = String(error?.message || error || '退出失败，请重试。');
-  }
-}
-
-function prepareToQuit() {
-  if (prepareQuitPromise) return prepareQuitPromise;
-  prepareQuitPromise = (async () => {
-    await window.NotchPersistence?.ready;
-    if (window.__notchWorkspaceHydrating) throw new Error('工作区正在恢复，请完成恢复后再退出。');
-    setQuitUiBusy(true);
-    window.NotchQuickCapture?.close();
-    window.NotchFocus?.close();
-    window.NotchTaskMap?.close();
-    document.activeElement?.blur();
-    stopMirror();
-    await window.NotchWorkspace?.prepareToQuit?.();
-    flushNotesEditorSave();
-    persistTodoDrafts(true);
-    if (noteInput) localStorage.setItem(NOTE_KEY, noteInput.value);
-    window.NotchQuickCapture?.persist?.();
-    if (!window.notchAPI?.saveWorkspaceData) throw new Error('保存接口暂不可用，请重试退出。');
-    const saved = await window.notchAPI.saveWorkspaceData(collectLocalStorageSnapshot());
-    if (saved !== true) throw new Error('工作区未能保存，请检查数据文件夹后重试。');
-  })().catch((error) => {
-    showQuitError(error);
-    throw error;
-  }).finally(() => { prepareQuitPromise = null; });
-  return prepareQuitPromise;
-}
-
-function requestQuit() {
-  if (quitRequestPromise) return quitRequestPromise;
-  if (quitUiBusy) return Promise.resolve({ ok: true, pending: true });
-  const status = document.getElementById('app-quit-status');
-  if (status) status.hidden = true;
-  setQuitUiBusy(true);
-  quitRequestPromise = (async () => {
-    try {
-      if (!window.notchAPI?.quitApp) throw new Error('退出接口暂不可用，请从应用菜单退出。');
-      const result = await window.notchAPI.quitApp();
-      if (!result?.ok) throw new Error(result?.error || '退出失败，请重试。');
-      return result;
-    } catch (error) {
-      showQuitError(error);
-      return { ok: false, error: error.message };
-    }
-  })().finally(() => { if (!quitUiBusy) quitRequestPromise = null; });
-  return quitRequestPromise;
-}
-
-document.querySelectorAll('[data-app-quit]').forEach((button) => {
-  button.addEventListener('click', (event) => {
-    event.stopPropagation();
-    void requestQuit();
-  });
-});
-window.notchAPI?.onPrepareQuit?.(async ({ token }) => {
-  try {
-    await prepareToQuit();
-    window.notchAPI.finishQuitPreparation({ token, ok: true });
-  } catch (error) {
-    window.notchAPI.finishQuitPreparation({ token, ok: false, error: error.message });
-  }
-});
-window.notchAPI?.onQuitCancelled?.((payload) => {
-  showQuitError(payload?.error || '已取消退出，可以重试。');
-  if (!isExpanded) void setMode(true);
-});
-window.notchAPI?.onOpenHome?.(async () => {
-  await setActiveTab('home');
-  if (!isExpanded) await setMode(true);
-});
-window.NotchLifecycle = Object.freeze({ requestQuit, prepareToQuit });
-
-// 组件读取待办快照，并通过同一条保存/提醒路径完成任务。
-window.NotchTodos = Object.freeze({
-  getSnapshot: () => ({
-    data: Object.fromEntries(PRIORITIES.map((id) => [id, data[id].map((item) => ({ ...item }))])),
-    names: { ...todoCategoryNames },
-  }),
-  complete: (category, id) => {
-    const item = data[category]?.find((todo) => todo.id === id);
-    if (!item || item.done) return false;
-    toggleTodo(category, id);
-    return data[category]?.find((todo) => todo.id === id)?.done === true;
-  },
-  add: (category, text, deadline = '') => PRIORITIES.includes(category) && addTodo(category, text, deadline),
-  notify: showStatusToast,
-});
-
-window.NotchNavigation = Object.freeze({
-  openTodos: () => setActiveTab('todo'),
-  async openNote(id) {
-    if (!TABS.includes('notes')) { showStatusToast('请先在设置中启用笔记页'); return false; }
-    try { flushNotesEditorSave(); } catch { showStatusToast('当前笔记尚未保存，请先释放空间后重试'); return false; }
-    if (!loadNoteArchive().some((note) => note.id === id)) return false;
-    selectedNoteId = id;
-    if (notesSearch) notesSearch.value = '';
-    await setActiveTab('notes');
-    renderNotesLibrary();
-    document.getElementById('notes-editor')?.focus({ preventScroll: true });
-    return true;
-  },
-  collapse: () => setMode(false),
-  async returnToWork() {
-    if (typeof window.notchAPI?.returnToWork !== 'function') return setMode(false);
-    try {
-      return await window.notchAPI.returnToWork();
-    } catch {
-      // Saving already succeeded. A failed native focus handoff must not keep
-      // the capture panel open or make the user submit the task a second time.
-      return setMode(false);
-    }
-  },
-  isExpanded: () => isExpanded,
-});
-
-window.NotchPersistenceHooks = Object.freeze({
-  initialSnapshot: initialWorkspaceSnapshot,
-  snapshot: collectLocalStorageSnapshot,
-  async flush() {
-    window.NotchQuickCapture?.close();
-    window.NotchFocus?.close();
-    window.NotchTaskMap?.close();
-    stopMirror();
-    await window.NotchWorkspace?.prepareToQuit?.();
-    flushNotesEditorSave();
-    persistTodoDrafts(true);
-    if (noteInput) localStorage.setItem(NOTE_KEY, noteInput.value);
-    window.NotchQuickCapture?.persist?.();
-    return collectLocalStorageSnapshot();
-  },
-});
 
 renderAll();
 renderClipList(); // 首屏确保 clip-list DOM 就绪时渲染一次（幂等）
